@@ -61,6 +61,23 @@ To use DroidLens with **Cursor**, **Claude Desktop**, or any MCP-compatible agen
 }
 ```
 
+### Available MCP Tools
+
+| Tool | Description |
+|---|---|
+| `get_stats` | Node/edge counts, index freshness check |
+| `search_nodes` | Find classes, methods, fields by name |
+| `get_node` | Inspect a single node (file, line, type, doc) |
+| `get_neighbors` | Callers, callees, and relationships for a node |
+| `get_call_chain` | Trace a full call chain between two nodes |
+| `impact` | Blast radius analysis (BFS on incoming edges) |
+| `find_usages` | All callers/references of a method or class |
+| `get_dependencies` | All dependencies of a class |
+| `list_classes` | List all indexed classes |
+| `sql_query` | Run raw SQLite queries against the graph |
+| `list_projects` | Discover all indexed repositories |
+| `switch_project` | Switch active repository |
+
 ---
 
 ## 📊 CLI Commands Reference

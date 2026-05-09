@@ -475,6 +475,8 @@ For any task involving Android code understanding, debugging, impact analysis, o
 | `droidlens_get_neighbors` | Callers, callees, and relationships for a node                |
 | `droidlens_get_call_chain`| Full call chain trace between two nodes                       |
 | `droidlens_list_classes`  | List all indexed classes with optional type filter            |
+| `droidlens_impact`        | Blast radius analysis (BFS on incoming edges)                 |
+| `droidlens_sql_query`     | Run raw SQLite queries against the graph database             |
 
 ## Typical Exploration Flow
 
@@ -562,6 +564,8 @@ trace call chains, assess impact, and navigate safely.
 | `droidlens_get_neighbors` | Callers, callees, and relationships for a node       |
 | `droidlens_get_call_chain`| Trace a full call chain between two nodes            |
 | `droidlens_list_classes`  | List all indexed classes                             |
+| `droidlens_impact`        | Blast radius analysis (BFS on incoming edges)        |
+| `droidlens_sql_query`     | Run raw SQLite queries against the graph database    |
 
 ## CLI
 

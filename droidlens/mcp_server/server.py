@@ -145,6 +145,52 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["name"],
             },
         ),
+        types.Tool(
+            name="get_node",
+            description="Inspect a single node by its ID (returns file, line, type, etc).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "Node ID."},
+                },
+                "required": ["id"],
+            },
+        ),
+        types.Tool(
+            name="get_neighbors",
+            description="Get callers, callees, and relationships for a node.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "Node ID."},
+                    "direction": {"type": "string", "enum": ["incoming", "outgoing", "both"], "default": "both", "description": "Direction of edges."},
+                },
+                "required": ["id"],
+            },
+        ),
+        types.Tool(
+            name="impact",
+            description="Blast radius analysis: finding all nodes that depend on a given node (BFS on incoming edges).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "Target Node ID."},
+                    "max_depth": {"type": "integer", "description": "Max depth (default 3).", "default": 3},
+                },
+                "required": ["id"],
+            },
+        ),
+        types.Tool(
+            name="sql_query",
+            description="Run a raw SQLite query against the graph database.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "SQL query (e.g. SELECT * FROM nodes WHERE type='Class')."},
+                },
+                "required": ["query"],
+            },
+        ),
     ]
 
 
@@ -326,6 +372,71 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextCont
             _active_project = pname
             stats = new_storage.get_stats()
             return text({"status": "ok", "project": pname, "project_path": project_path, **stats})
+
+        # ── get_node ───────────────────────────────────────────────────────────
+        elif name == "get_node":
+            node_id = arguments.get("id", "")
+            node = st.get_node(node_id)
+            if not node:
+                return text({"error": f"Node '{node_id}' not found."})
+            return text(node.to_dict())
+
+        # ── get_neighbors ──────────────────────────────────────────────────────
+        elif name == "get_neighbors":
+            node_id = str(arguments.get("id", ""))
+            direction = arguments.get("direction", "both")
+            node = st.get_node(node_id)
+            if not node:
+                return text({"error": f"Node '{node_id}' not found."})
+            
+            result = {"node": node.to_dict()}
+            if direction in ("outgoing", "both"):
+                out_edges = st.get_edges_from(node_id)
+                result["outgoing"] = [{"edge": e.to_dict(), "target": st.get_node(e.target_id).to_dict() if st.get_node(e.target_id) else None} for e in out_edges]
+            if direction in ("incoming", "both"):
+                in_edges = st.get_edges_to(node_id)
+                result["incoming"] = [{"edge": e.to_dict(), "source": st.get_node(e.source_id).to_dict() if st.get_node(e.source_id) else None} for e in in_edges]
+                
+            return text(result)
+
+        # ── impact ─────────────────────────────────────────────────────────────
+        elif name == "impact":
+            node_id = str(arguments.get("id", ""))
+            max_depth = int(arguments.get("max_depth", 3))
+            start_node = st.get_node(node_id)
+            if not start_node:
+                return text({"error": f"Node '{node_id}' not found."})
+
+            visited, chain = set(), []
+            queue = [(node_id, 0)]
+
+            while queue:
+                current_id, depth = queue.pop(0)
+                if depth > max_depth or current_id in visited:
+                    continue
+                
+                visited.add(current_id)
+                n = st.get_node(current_id)
+                if not n:
+                    continue
+                    
+                chain.append({"depth": depth, "node": n.to_dict()})
+                for edge in st.get_edges_to(current_id):
+                    queue.append((edge.source_id, depth + 1))
+
+            return text(chain)
+
+        # ── sql_query ──────────────────────────────────────────────────────────
+        elif name == "sql_query":
+            query = arguments.get("query", "")
+            try:
+                query_upper = query.upper()
+                if any(kw in query_upper for kw in ["DROP ", "DELETE ", "UPDATE ", "INSERT ", "REPLACE ", "ALTER "]):
+                    return text({"error": "Only SELECT queries are allowed for safety."})
+                rows = st._conn.execute(query).fetchall()
+                return text([dict(r) for r in rows])
+            except Exception as e:
+                return text({"error": f"SQL Error: {str(e)}"})
 
         else:
             return text({"error": f"Unknown tool: {name}"})

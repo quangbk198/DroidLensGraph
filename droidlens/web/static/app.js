@@ -225,11 +225,26 @@ function buildEdgeLegend() {
 
 // ── Search ────────────────────────────────────────────────────────────────────
 let searchTimer = null;
-document.getElementById("search-input").addEventListener("input", (e) => {
+const searchInput = document.getElementById("search-input");
+const searchDropdown = document.getElementById("search-dropdown");
+
+searchInput.addEventListener("input", (e) => {
   clearTimeout(searchTimer);
   const q = e.target.value.trim();
   if (!q) { clearSearchResults(); return; }
   searchTimer = setTimeout(() => doSearch(q), 250);
+});
+
+// Close dropdown when clicking outside
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#search-container")) {
+    searchDropdown.style.display = "none";
+  }
+});
+searchInput.addEventListener("focus", () => {
+  if (searchDropdown.innerHTML.trim() !== "") {
+    searchDropdown.style.display = "block";
+  }
 });
 
 async function doSearch(q) {
@@ -239,10 +254,10 @@ async function doSearch(q) {
 }
 
 function renderSearchResults(results) {
-  const container = document.getElementById("search-results");
-  container.innerHTML = "";
+  searchDropdown.innerHTML = "";
+  searchDropdown.style.display = "block";
   if (!results.length) {
-    container.innerHTML = `<div style="padding:12px;color:var(--text-muted);font-size:12px;">No results</div>`;
+    searchDropdown.innerHTML = `<div style="padding:12px;color:var(--text-muted);font-size:12px;">No results</div>`;
     return;
   }
   results.slice(0, 30).forEach((n) => {
@@ -255,13 +270,17 @@ function renderSearchResults(results) {
         <div class="sri-pkg">${n.package_name || n.qualified_name || ""}</div>
       </div>
     `;
-    div.addEventListener("click", () => focusNode(n.id));
-    container.appendChild(div);
+    div.addEventListener("click", (e) => {
+      searchDropdown.style.display = "none";
+      focusNode(n.id);
+    });
+    searchDropdown.appendChild(div);
   });
 }
 
 function clearSearchResults() {
-  document.getElementById("search-results").innerHTML = "";
+  searchDropdown.innerHTML = "";
+  searchDropdown.style.display = "none";
 }
 
 function focusNode(nodeId) {
@@ -269,8 +288,12 @@ function focusNode(nodeId) {
   const node = cy.getElementById(nodeId);
   if (!node || !node.length) { showToast("Node not visible — adjust filters."); return; }
   cy.animate({ fit: { eles: node.closedNeighborhood(), padding: 80 }, duration: 400 });
+  
+  dimAll();
+  highlightNeighborhood(node);
   node.select();
   showDetail(node.data());
+  showCodeViewer(node.data("file_path"), node.data("line_number"), node.data("language"));
 }
 
 // ── Node interactions ─────────────────────────────────────────────────────────

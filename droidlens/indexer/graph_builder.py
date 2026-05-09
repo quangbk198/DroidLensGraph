@@ -55,10 +55,10 @@ def _resolve_cross_file_calls(storage: GraphStorage):
     if not abstract_methods:
         return
         
-    concrete_by_name = {}
+    concrete_nodes = {}
     for n in storage.get_all_nodes():
-        if n.type.value == "Method" and n.file_path:
-            concrete_by_name.setdefault(n.name, []).append(n.id)
+        if n.type.value in ("Method", "Class") and n.file_path:
+            concrete_nodes.setdefault(n.name, []).append(n)
             
     new_edges = []
     edges_to_delete = []
@@ -69,17 +69,19 @@ def _resolve_cross_file_calls(storage: GraphStorage):
             if method_name in IGNORE_METHODS:
                 continue
 
-            concrete_ids = concrete_by_name.get(method_name, [])
+            concrete_targets = concrete_nodes.get(method_name, [])
             
-            if concrete_ids:
+            if concrete_targets:
                 edges_to_delete.append(e.id)
-                for cid in concrete_ids:
-                    new_eid = hashlib.md5(f"{e.source_id}|{cid}|{e.type.value}".encode()).hexdigest()[:16]
+                for cnode in concrete_targets:
+                    cid = cnode.id
+                    etype = EdgeType.INSTANTIATES if cnode.type.value == "Class" else e.type
+                    new_eid = hashlib.md5(f"{e.source_id}|{cid}|{etype.value}".encode()).hexdigest()[:16]
                     new_edge = Edge(
                         id=new_eid,
                         source_id=e.source_id,
                         target_id=cid,
-                        type=e.type,
+                        type=etype,
                         metadata=e.metadata
                     )
                     new_edges.append(new_edge)

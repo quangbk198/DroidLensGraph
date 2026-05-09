@@ -35,6 +35,59 @@ def _update_gitignore(project_path: str):
             console.print(f"[yellow]⚠ Could not create .gitignore: {exc}[/yellow]")
 
 
+def _resolve_cross_file_calls(storage: GraphStorage):
+    """Link abstract method refs to concrete methods across the entire project."""
+    import hashlib
+    from droidlens.graph.models import Edge, EdgeType
+
+    abstract_methods = {
+        n.id: n.name 
+        for n in storage.get_all_nodes() 
+        if n.type.value == "Method" and not n.file_path
+    }
+    if not abstract_methods:
+        return
+        
+    concrete_by_name = {}
+    for n in storage.get_all_nodes():
+        if n.type.value == "Method" and n.file_path:
+            concrete_by_name.setdefault(n.name, []).append(n.id)
+            
+    new_edges = []
+    edges_to_delete = []
+    
+    for e in storage.get_all_edges():
+        if e.type == EdgeType.CALLS and e.target_id in abstract_methods:
+            method_name = abstract_methods[e.target_id]
+            concrete_ids = concrete_by_name.get(method_name, [])
+            
+            if concrete_ids:
+                edges_to_delete.append(e.id)
+                for cid in concrete_ids:
+                    new_eid = hashlib.md5(f"{e.source_id}|{cid}|{e.type.value}".encode()).hexdigest()[:16]
+                    new_edge = Edge(
+                        id=new_eid,
+                        source_id=e.source_id,
+                        target_id=cid,
+                        type=e.type,
+                        metadata=e.metadata
+                    )
+                    new_edges.append(new_edge)
+                    
+    for e in new_edges:
+        storage.upsert_edge(e)
+    for eid in edges_to_delete:
+        storage._conn.execute("DELETE FROM edges WHERE id=?", (eid,))
+        
+    storage._conn.execute("""
+        DELETE FROM nodes 
+        WHERE type='Method' AND (file_path IS NULL OR file_path='')
+        AND id NOT IN (SELECT target_id FROM edges)
+        AND id NOT IN (SELECT source_id FROM edges)
+    """)
+    storage.commit()
+
+
 def build_graph(
     project_path: str,
     on_progress: Optional[Callable[[int, int, str], None]] = None,
@@ -80,6 +133,9 @@ def build_graph(
                 console.print(f"[yellow]⚠ Skipped {file_path.name}: {exc}")
 
         storage.commit()
+
+    # Perform cross-file call resolution
+    _resolve_cross_file_calls(storage)
 
     stats = storage.get_stats()
     storage.set_project_info("path", project_path)

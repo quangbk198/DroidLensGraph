@@ -268,12 +268,12 @@ class KotlinFileParser:
             first = node.children[0] if node.children else None
             if first:
                 callee_name = ""
-                if first.type == "simple_identifier":
+                if first.type in ("simple_identifier", "identifier"):
                     callee_name = _node_text(first, self.src)
                 elif first.type == "navigation_expression":
                     # e.g. viewModel.someMethod() — get last identifier
                     for sub in reversed(first.children):
-                        if sub.type == "simple_identifier":
+                        if sub.type in ("simple_identifier", "identifier"):
                             callee_name = _node_text(sub, self.src)
                             break
                 if callee_name:

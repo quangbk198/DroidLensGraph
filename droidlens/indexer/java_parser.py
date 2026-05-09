@@ -254,4 +254,19 @@ def parse_java_file(file_path: str) -> Tuple[List[Node], List[Edge]]:
     tree = _parser.parse(src)
     fp = JavaFileParser(file_path, src)
     fp.parse(tree.root_node)
+
+    # Simple intra-file method call resolution
+    concrete_methods = {n.name: n.id for n in fp.nodes if n.type == NodeType.METHOD and n.file_path}
+    method_refs = {n.id: n for n in fp.nodes if n.type == NodeType.METHOD and not n.file_path}
+
+    for edge in fp.edges:
+        if edge.type == EdgeType.CALLS and edge.target_id in method_refs:
+            ref_name = method_refs[edge.target_id].name
+            if ref_name in concrete_methods:
+                edge.target_id = concrete_methods[ref_name]
+
+    # Remove unreferenced method_refs to keep graph clean
+    used_nodes = {e.target_id for e in fp.edges} | {e.source_id for e in fp.edges}
+    fp.nodes = [n for n in fp.nodes if n.file_path or n.id in used_nodes]
+
     return fp.nodes, fp.edges

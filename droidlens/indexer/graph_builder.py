@@ -13,7 +13,7 @@ from droidlens.indexer.java_parser import parse_java_file
 from droidlens.indexer.kotlin_parser import parse_kotlin_file
 from droidlens.graph.storage import GraphStorage, get_db_path
 
-console = Console()
+console = Console(stderr=True)
 
 def _update_gitignore(project_path: str):
     gitignore_path = Path(project_path) / ".gitignore"

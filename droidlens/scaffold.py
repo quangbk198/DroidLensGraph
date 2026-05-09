@@ -87,6 +87,17 @@ Shows node/edge counts, breakdown by type, and when the project was last indexed
 
 ---
 
+### clean — Delete graph indexes
+
+```bash
+droidlens clean <path>
+droidlens clean --all --force
+```
+
+Deletes the index for the specified project, or all projects if `--all` is used. Use this to clear stale databases or reset the global registry.
+
+---
+
 ## After Indexing
 
 1. Run `droidlens serve --project <path>` to explore the graph visually

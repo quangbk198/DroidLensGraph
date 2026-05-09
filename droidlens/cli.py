@@ -204,3 +204,65 @@ def list_projects():
         )
 
     console.print(table)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# clean
+# ──────────────────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--all", "all_projects", is_flag=True, help="Delete all indexes in the registry.")
+@click.option("--force", is_flag=True, help="Force deletion without asking for confirmation.")
+@click.argument("project_path", default=".", type=click.Path())
+def clean(all_projects: bool, force: bool, project_path: str):
+    """Delete the index for a project or all projects."""
+    import os
+    import shutil
+    from pathlib import Path
+    from droidlens.registry import list_projects as _list, unregister, _REGISTRY_FILE
+
+    if all_projects:
+        if not force:
+            click.confirm("This will delete ALL graph databases and the global registry. Continue?", abort=True)
+        
+        projects = _list()
+        for name, info in projects.items():
+            db_path = Path(info["db"])
+            droidlens_dir = db_path.parent
+            if droidlens_dir.exists() and droidlens_dir.name == ".droidlens":
+                try:
+                    shutil.rmtree(droidlens_dir)
+                    console.print(f"[dim]Removed directory: {droidlens_dir}[/dim]")
+                except Exception as e:
+                    console.print(f"[yellow]Could not remove {droidlens_dir}: {e}[/yellow]")
+            unregister(info["path"])
+
+        if _REGISTRY_FILE.exists():
+            try:
+                _REGISTRY_FILE.unlink()
+            except Exception:
+                pass
+
+        console.print("[bold green]✓ Deleted all indexes and cleared registry.[/bold green]")
+    else:
+        project_path = os.path.abspath(project_path)
+        from droidlens.graph.storage import get_db_path
+        db_path = Path(get_db_path(project_path))
+        droidlens_dir = db_path.parent
+
+        if not droidlens_dir.exists():
+            console.print(f"[yellow]No index found for project at {project_path}[/yellow]")
+            return
+
+        if not force:
+            click.confirm(f"This will delete the index at {droidlens_dir}. Continue?", abort=True)
+
+        try:
+            shutil.rmtree(droidlens_dir)
+            console.print(f"[dim]Removed directory: {droidlens_dir}[/dim]")
+        except Exception as e:
+            console.print(f"[red]Could not remove {droidlens_dir}: {e}[/red]")
+            return
+
+        unregister(project_path)
+        console.print(f"[bold green]✓ Deleted index for {project_path}.[/bold green]")

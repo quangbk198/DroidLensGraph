@@ -72,6 +72,8 @@ To use DroidLens with **Cursor**, **Claude Desktop**, or any MCP-compatible agen
 | `python -m droidlens mcp` | Start MCP stdio server |
 | `python -m droidlens stats <path>` | Print graph statistics |
 | `python -m droidlens list` | List all registered projects |
+| `python -m droidlens clean <path>` | Delete index for a specific project |
+| `python -m droidlens clean --all --force` | Delete all indexes across all projects |
 
 ---
 

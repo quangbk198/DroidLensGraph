@@ -75,7 +75,7 @@ class KotlinFileParser:
     def parse(self, root: TSNode):
         self.package = _get_package(root, self.src)
         for child in root.children:
-            if child.type == "class_declaration":
+            if child.type in ("class_declaration", "object_declaration"):
                 self._parse_class(child, parent_id=None)
             elif child.type == "function_declaration":
                 self._parse_function(child, parent_id=None)
@@ -87,6 +87,9 @@ class KotlinFileParser:
         # Determine kind: class / interface / object / enum class
         kind = "class"
         is_abstract = False
+        if node.type == "object_declaration":
+            kind = "object"
+            
         for child in node.children:
             if child.type == "interface":
                 kind = "interface"
@@ -180,7 +183,7 @@ class KotlinFileParser:
 
     def _parse_class_body(self, body: TSNode, parent_id: str):
         for child in body.children:
-            if child.type == "class_declaration":
+            if child.type in ("class_declaration", "object_declaration"):
                 self._parse_class(child, parent_id)
             elif child.type == "function_declaration":
                 self._parse_function(child, parent_id)

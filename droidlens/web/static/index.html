@@ -54,12 +54,22 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
   padding: 0 20px; flex-shrink: 0; z-index: 10;
 }
 #topbar .logo {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 18px; font-weight: 700; white-space: nowrap;
+  display: flex; align-items: center; gap: 10px;
+  text-decoration: none;
+  transition: opacity .2s;
+}
+#topbar .logo:hover { opacity: 0.8; }
+#topbar .logo img {
+  height: 32px;
+  width: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 0 8px rgba(108,99,255,0.3));
+}
+#topbar .logo-text {
+  font-size: 19px; font-weight: 700; white-space: nowrap;
   background: linear-gradient(135deg, var(--accent), var(--accent2));
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
 }
-#topbar .logo span { font-size: 22px; }
 .topbar-sep { width: 1px; height: 28px; background: var(--border); }
 #project-name { font-size: 13px; color: var(--text-dim); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
 #search-container { flex: 1; max-width: 400px; position: relative; z-index: 200; }
@@ -273,7 +283,10 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 
 <!-- ── Top bar ──────────────────────────────────────────────────────── -->
 <div id="topbar">
-  <div class="logo"><span>🔭</span> DroidLens</div>
+  <a href="/" class="logo">
+    <img src="/static/logo.png?v=2" alt="DroidLens" />
+    <span class="logo-text">DroidLens</span>
+  </a>
   <div class="topbar-sep"></div>
   <div id="project-name">No project loaded</div>
   <div class="topbar-sep"></div>

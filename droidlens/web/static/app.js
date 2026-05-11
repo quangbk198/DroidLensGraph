@@ -185,7 +185,7 @@ async function loadGraph() {
   showLoading(true);
   try {
     const types = [...activeTypes].join(",");
-    const resp = await fetch(`/api/graph?node_types=${encodeURIComponent(types)}&max_nodes=10000`);
+    const resp = await fetch(`/api/graph?node_types=${encodeURIComponent(types)}&max_nodes=100000`);
     allData = await resp.json();
     
     if (!graph) initSigma();

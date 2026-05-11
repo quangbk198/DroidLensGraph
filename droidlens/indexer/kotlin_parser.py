@@ -430,8 +430,7 @@ class KotlinFileParser:
                     self._add_edge(caller_id, ref_id, EdgeType.READS,
                                    {"line": node.start_point[0] + 1,
                                     "qualifier": qualifier})
-            # Do NOT recurse into navigation_expression children
-            return
+            # We must recurse because navigation_expression can contain call_expression!
 
         for child in node.children:
             self._collect_calls(child, caller_id)

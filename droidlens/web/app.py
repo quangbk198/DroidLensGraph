@@ -61,7 +61,7 @@ def api_stats():
 def api_graph(
     node_types: str = Query(default="", description="Comma-separated NodeType values to include"),
     edge_types: str = Query(default="", description="Comma-separated EdgeType values to include"),
-    max_nodes: int = Query(default=800),
+    max_nodes: int = Query(default=0, description="Max nodes to return, 0 means all"),
 ):
     st = get_st()
     all_nodes = st.get_all_nodes()
@@ -73,7 +73,8 @@ def api_graph(
         all_nodes = [n for n in all_nodes if n.type.value in allowed_node_types]
 
     # Limit nodes for performance
-    all_nodes = all_nodes[:max_nodes]
+    if max_nodes > 0:
+        all_nodes = all_nodes[:max_nodes]
     node_ids = {n.id for n in all_nodes}
 
     # Only keep edges where both endpoints are visible

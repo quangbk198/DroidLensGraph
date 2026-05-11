@@ -76,8 +76,26 @@ class JavaFileParser:
 
     def _add_edge(self, source_id: str, target_id: str, etype: EdgeType, meta=None):
         eid = _uid(source_id, target_id, etype.value)
+        meta = meta or {}
+        
+        for existing in self.edges:
+            if existing.id == eid:
+                if "line" in meta:
+                    if "lines" not in existing.metadata:
+                        if "line" in existing.metadata:
+                            existing.metadata["lines"] = [existing.metadata["line"]]
+                        else:
+                            existing.metadata["lines"] = []
+                    if meta["line"] not in existing.metadata["lines"]:
+                        existing.metadata["lines"].append(meta["line"])
+                    existing.metadata["line"] = meta["line"]
+                return
+
+        if "line" in meta:
+            meta["lines"] = [meta["line"]]
+
         self.edges.append(Edge(id=eid, source_id=source_id, target_id=target_id,
-                               type=etype, metadata=meta or {}))
+                               type=etype, metadata=meta))
 
     # ------------------------------------------------------------------ #
     # Top-level dispatcher

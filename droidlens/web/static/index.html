@@ -109,11 +109,43 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 .edge-legend-item { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .edge-legend-line { width: 14px; height: 2px; flex-shrink: 0; }
 .edge-legend-label { font-size: 11px; color: var(--text-dim); }
-.search-result-item { padding: 8px 10px; border-radius: 8px; margin-bottom: 4px; cursor: pointer; transition: background .15s; display: flex; align-items: center; gap: 8px; }
-.search-result-item:hover { background: var(--surface); }
-.sri-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.sri-name { font-size: 12px; font-weight: 500; }
-.sri-pkg { font-size: 10px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-result-item {
+  padding: 8px 10px; border-radius: 8px; margin-bottom: 2px; cursor: pointer;
+  transition: background .12s; display: flex; align-items: flex-start; gap: 10px;
+}
+.search-result-item:hover, .search-result-item.cursor { background: var(--surface); }
+.sri-icon {
+  width: 26px; height: 26px; border-radius: 6px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; letter-spacing: 0;
+}
+.sri-body { flex: 1; min-width: 0; }
+.sri-top { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+.sri-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+.sri-type-badge {
+  font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
+  white-space: nowrap; flex-shrink: 0; letter-spacing: .02em;
+}
+.sri-hidden-badge {
+  font-size: 10px; font-weight: 500; padding: 1px 5px; border-radius: 4px;
+  background: rgba(251,146,60,.12); color: #fb923c; flex-shrink: 0;
+}
+.sri-pkg { font-size: 10px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
+.sri-highlight { background: rgba(108,99,255,.25); color: var(--text); border-radius: 2px; padding: 0 1px; }
+.search-section-header {
+  font-size: 10px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--text-dim); padding: 8px 10px 4px; margin-top: 2px;
+  display: flex; align-items: center; gap: 5px;
+}
+.search-section-header:first-child { margin-top: 0; padding-top: 4px; }
+.ssh-score {
+  background: rgba(108,99,255,.15); color: var(--accent);
+  padding: 1px 6px; border-radius: 4px; font-size: 9px; font-weight: 700; letter-spacing: .04em;
+}
+.ssh-sep { color: var(--text-muted); font-size: 10px; }
+.search-empty { padding: 14px 12px; color: var(--text-muted); font-size: 12px; }
+
+
 
 /* Layout running indicator */
 #layout-indicator {

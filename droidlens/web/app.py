@@ -141,12 +141,51 @@ def api_source(file_path: str = Query(...)):
 
 
 @app.get("/api/search")
-def api_search(q: str = Query(default="")):
+def api_search(
+    q: str = Query(default=""),
+    types: str = Query(default="", description="Comma-separated node types to filter"),
+    limit: int = Query(default=50, ge=1, le=200),
+):
     st = get_st()
-    if not q:
+    if not q or len(q.strip()) < 1:
         return []
-    nodes = st.search_nodes(q)
-    return [n.to_dict() for n in nodes]
+    q = q.strip()
+    node_types = [t for t in types.split(",") if t] if types else None
+    nodes = st.search_nodes(q, node_types=node_types, limit=limit)
+
+    # Type priority: lower number = higher priority in results
+    TYPE_PRIORITY = {
+        "Class":         1,
+        "Interface":     1,
+        "AbstractClass": 1,
+        "Enum":          2,
+        "Object":        2,
+        "Method":        3,
+        "Function":      3,
+        "Field":         4,
+        "Property":      4,
+    }
+
+    # Compute rank score for frontend display
+    q_lower = q.lower()
+    results = []
+    for n in nodes:
+        name_lower = n.name.lower()
+        if name_lower == q_lower:
+            score = 3  # exact
+        elif name_lower.startswith(q_lower):
+            score = 2  # prefix
+        else:
+            score = 1  # contains
+        d = n.to_dict()
+        d["_score"] = score
+        d["_type_priority"] = TYPE_PRIORITY.get(n.type.value, 5)
+        results.append(d)
+
+    # Sort: score DESC (higher first), then type priority ASC (structural types first), then name ASC
+    results.sort(key=lambda x: (-x["_score"], x["_type_priority"], x.get("name", "").lower()))
+
+    return results
 
 
 class IndexRequest(BaseModel):

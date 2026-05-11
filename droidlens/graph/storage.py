@@ -163,13 +163,48 @@ class GraphStorage:
         row = self._conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
         return self._row_to_node(row) if row else None
 
-    def search_nodes(self, query: str) -> List[Node]:
-        q = f"%{query}%"
-        rows = self._conn.execute(
-            "SELECT * FROM nodes WHERE name LIKE ? OR qualified_name LIKE ? LIMIT 50",
-            (q, q)
+    def search_nodes(self, query: str, node_types: list[str] | None = None, limit: int = 50) -> List[Node]:
+        """Ranked search: exact name → prefix → contains (name or qualified_name).
+        
+        Results are ranked:
+        - Score 3: exact name match (case-insensitive)
+        - Score 2: name starts with query
+        - Score 1: name contains query or qualified_name contains query
+        """
+        q_lower = query.lower()
+        type_filter = ""
+        params_base: list = []
+        if node_types:
+            placeholders = ",".join("?" * len(node_types))
+            type_filter = f" AND type IN ({placeholders})"
+            params_base = list(node_types)
+
+        # Pass 1: exact name match
+        exact_rows = self._conn.execute(
+            f"SELECT * FROM nodes WHERE lower(name)=?{type_filter}",
+            [q_lower] + params_base
         ).fetchall()
-        return [self._row_to_node(r) for r in rows]
+        exact_ids = {r["id"] for r in exact_rows}
+
+        # Pass 2: prefix match on name
+        prefix_rows = self._conn.execute(
+            f"SELECT * FROM nodes WHERE lower(name) LIKE ?{type_filter} AND id NOT IN ({','.join('?' * len(exact_ids)) or 'NULL'})",
+            [q_lower + "%"] + params_base + list(exact_ids)
+        ).fetchall() if len(exact_rows) < limit else []
+        prefix_ids = {r["id"] for r in prefix_rows}
+
+        # Pass 3: contains match (name or qualified_name)
+        already_found = exact_ids | prefix_ids
+        contains_rows = self._conn.execute(
+            f"""SELECT * FROM nodes WHERE (lower(name) LIKE ? OR lower(qualified_name) LIKE ?){type_filter}
+                AND id NOT IN ({','.join('?' * len(already_found)) or 'NULL'})
+                LIMIT ?""",
+            ["%" + q_lower + "%", "%" + q_lower + "%"] + params_base + list(already_found) + [limit]
+        ).fetchall()
+
+        all_rows = exact_rows + prefix_rows + contains_rows
+        return [self._row_to_node(r) for r in all_rows[:limit]]
+
 
     # ------------------------------------------------------------------
     # Read — edges

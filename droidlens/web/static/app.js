@@ -429,45 +429,165 @@ function hideHoverTooltip() {
 const searchInput = document.getElementById("search-input");
 const searchDropdown = document.getElementById("search-dropdown");
 let searchTimer = null;
+let searchResults = [];  // current displayed results
+let searchCursor = -1;   // keyboard nav cursor
+
+// Score badge labels matching GitNexus style
+const SCORE_LABEL = { 3: "exact", 2: "prefix", 1: "match" };
+const SCORE_COLOR  = { 3: "#22c55e", 2: "#3b82f6", 1: "#94a3b8" };
 
 searchInput.addEventListener("input", (e) => {
   clearTimeout(searchTimer);
-  const q = e.target.value.trim().toLowerCase();
-  if (!q) { searchDropdown.style.display = "none"; return; }
-  searchTimer = setTimeout(() => doLocalSearch(q), 250);
+  const q = e.target.value.trim();
+  if (!q) { searchDropdown.style.display = "none"; searchResults = []; searchCursor = -1; return; }
+  searchTimer = setTimeout(() => doApiSearch(q), 180);
 });
 
-function doLocalSearch(query) {
-  if (!graph) return;
-  const results = [];
-  graph.forEachNode((node, attrs) => {
-    if (attrs.name.toLowerCase().includes(query) || (attrs.qualified_name && attrs.qualified_name.toLowerCase().includes(query))) {
-      results.push({ id: node, ...attrs });
+searchInput.addEventListener("keydown", (e) => {
+  if (searchDropdown.style.display === "none") return;
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    searchCursor = Math.min(searchCursor + 1, searchResults.length - 1);
+    highlightCursor();
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    searchCursor = Math.max(searchCursor - 1, 0);
+    highlightCursor();
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    if (searchCursor >= 0 && searchResults[searchCursor]) {
+      selectSearchResult(searchResults[searchCursor]);
+    } else if (searchResults.length > 0) {
+      selectSearchResult(searchResults[0]);
     }
-  });
-  
-  searchDropdown.innerHTML = "";
-  if (results.length === 0) {
-    searchDropdown.innerHTML = `<div style="padding:12px;color:var(--text-muted);font-size:12px;">No results</div>`;
-  } else {
-    results.slice(0, 30).forEach(n => {
-      const div = document.createElement("div");
-      div.className = "search-result-item";
-      div.innerHTML = `
-        <span class="sri-dot" style="background:${nodeColor(n.type)}"></span>
-        <div style="min-width:0">
-          <div class="sri-name">${n.name}</div>
-          <div class="sri-pkg">${n.qualified_name || ""}</div>
-        </div>
-      `;
-      div.addEventListener("click", () => {
-        searchDropdown.style.display = "none";
-        focusNode(n.id);
-      });
-      searchDropdown.appendChild(div);
-    });
+  } else if (e.key === "Escape") {
+    searchDropdown.style.display = "none";
+    searchCursor = -1;
   }
+});
+
+function highlightCursor() {
+  const items = searchDropdown.querySelectorAll(".search-result-item");
+  items.forEach((el, i) => el.classList.toggle("cursor", i === searchCursor));
+  if (items[searchCursor]) items[searchCursor].scrollIntoView({ block: "nearest" });
+}
+
+async function doApiSearch(query) {
+  try {
+    const resp = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=50`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    searchResults = data;
+    searchCursor = -1;
+    renderSearchDropdown(query);
+  } catch (err) {
+    console.warn("Search error:", err);
+  }
+}
+
+function selectSearchResult(node) {
+  searchDropdown.style.display = "none";
+  searchInput.value = node.name;
+  searchCursor = -1;
+
+  // If node is in the current graph, focus it directly
+  if (graph && graph.hasNode(node.id)) {
+    focusNode(node.id);
+  } else {
+    // Node is filtered/hidden — still show its detail from API
+    showDetailById(node.id);
+  }
+}
+
+async function showDetailById(nodeId) {
+  try {
+    const resp = await fetch(`/api/node/${nodeId}`);
+    const data = await resp.json();
+    renderDetailPanel(data);
+    document.getElementById("detail-panel").classList.add("open");
+    if (data.node.file_path) showCodeViewer(data.node.file_path, data.node.line_number, data.node.language);
+  } catch (err) {
+    console.warn("Could not load node detail:", err);
+  }
+}
+
+function renderSearchDropdown(query) {
+  searchDropdown.innerHTML = "";
+
+  if (searchResults.length === 0) {
+    searchDropdown.innerHTML = `<div class="search-empty">No results for "<strong>${query}</strong>"</div>`;
+    searchDropdown.style.display = "block";
+    return;
+  }
+
+  // Type → group label
+  const TYPE_GROUP_LABEL = {
+    1: "Classes & Interfaces",
+    2: "Enums & Objects",
+    3: "Methods & Functions",
+    4: "Fields & Properties",
+    5: "Other",
+  };
+
+  // Track section dividers by composite key: "score-typePriority"
+  let lastSectionKey = null;
+
+  searchResults.forEach((n, idx) => {
+    const score = n._score ?? 1;
+    const typePri = n._type_priority ?? 5;
+    const sectionKey = `${score}-${typePri}`;
+
+    // Only emit a new section header when the key changes
+    if (sectionKey !== lastSectionKey) {
+      lastSectionKey = sectionKey;
+
+      // Score label
+      const scoreLabel = score === 3 ? "Exact" : score === 2 ? "Prefix" : "Contains";
+      // Type group label
+      const typeGroupLabel = TYPE_GROUP_LABEL[typePri] || "Other";
+
+      const divider = document.createElement("div");
+      divider.className = "search-section-header";
+      divider.innerHTML = `<span class="ssh-score">${scoreLabel}</span><span class="ssh-sep">·</span>${typeGroupLabel}`;
+      searchDropdown.appendChild(divider);
+    }
+
+    const color = nodeColor(n.type);
+    const pkgPath = n.qualified_name && n.qualified_name !== n.name
+      ? n.qualified_name.split(".").slice(0, -1).join(".")
+      : n.package_name || "";
+    const fileName = n.file_path ? n.file_path.split(/[/\\]/).pop() : "";
+    const inGraph = graph && graph.hasNode(n.id);
+
+    const div = document.createElement("div");
+    div.className = "search-result-item";
+    div.innerHTML = `
+      <span class="sri-icon" style="background:${color}22;color:${color}">${n.type.charAt(0)}</span>
+      <div class="sri-body">
+        <div class="sri-top">
+          <span class="sri-name">${highlightQuery(n.name, query)}</span>
+          <span class="sri-type-badge" style="background:${color}22;color:${color}">${n.type}</span>
+          ${!inGraph ? '<span class="sri-hidden-badge" title="Node not in current graph view">hidden</span>' : ''}
+        </div>
+        <div class="sri-pkg">${pkgPath ? pkgPath + ' · ' : ''}${fileName}</div>
+      </div>
+    `;
+    div.addEventListener("mouseenter", () => {
+      searchCursor = idx;
+      highlightCursor();
+    });
+    div.addEventListener("click", () => selectSearchResult(n));
+    searchDropdown.appendChild(div);
+  });
+
   searchDropdown.style.display = "block";
+}
+
+function highlightQuery(text, query) {
+  if (!query) return text;
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx < 0) return text;
+  return text.slice(0, idx) + `<mark class="sri-highlight">${text.slice(idx, idx + query.length)}</mark>` + text.slice(idx + query.length);
 }
 
 // Filtering

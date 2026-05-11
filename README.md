@@ -215,7 +215,7 @@ Tools like **Cursor** and **Claude** are powerful, but they struggle with large-
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=quangbk198/DroidLens&type=Date)](https://star-history.com/#quangbk198/DroidLens&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=quangbk198/DroidLensGraph&type=Date)](https://star-history.com/#quangbk198/DroidLensGraph&Date)
 
 ---
 

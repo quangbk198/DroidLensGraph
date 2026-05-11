@@ -6,12 +6,9 @@
 <title>DroidLens — Android Code Graph</title>
 <meta name="description" content="Visual knowledge graph browser for Android Java/Kotlin codebases." />
 
-<!-- Cytoscape.js + dagre layout -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.min.js"></script>
+<!-- Sigma.js + Graphology (Loaded via ES Modules in app.js) -->
 
-<!-- Highlight.js for code viewing -->
+<!-- Highlight.js -->
 <link id="hljs-theme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/java.min.js"></script>
@@ -31,53 +28,30 @@
   --border:    rgba(255,255,255,0.08);
   --accent:    #6c63ff;
   --accent2:   #00d4aa;
-  --accent3:   #ff6b9d;
   --text:      #e2e8f0;
   --text-dim:  #64748b;
   --text-muted:#334155;
   --sidebar-w: 300px;
   --detail-w:  320px;
+  --code-w:    450px;
   --topbar-h:  56px;
-
-  /* node colours */
-  --c-class:     #6c63ff;
-  --c-abstract:  #a78bfa;
-  --c-interface: #00d4aa;
-  --c-enum:      #fb923c;
-  --c-object:    #38bdf8;
-  --c-method:    #f472b6;
-  --c-function:  #e879f9;
-  --c-field:     #4ade80;
-  --c-property:  #34d399;
-  --c-package:   #facc15;
-  --c-unknown:   #94a3b8;
 }
 [data-theme="light"] {
-  --bg:        #f8fafc;
-  --bg2:       #ffffff;
-  --bg3:       #f1f5f9;
-  --surface:   rgba(0,0,0,0.04);
-  --border:    rgba(0,0,0,0.08);
-  --text:      #0f172a;
-  --text-dim:  #475569;
-  --text-muted:#94a3b8;
+  --bg: #f8fafc; --bg2: #ffffff; --bg3: #f1f5f9;
+  --surface: rgba(0,0,0,0.04); --border: rgba(0,0,0,0.08);
+  --text: #0f172a; --text-dim: #475569; --text-muted: #94a3b8;
 }
 body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-
-/* ── Scrollbar ────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
 /* ── Top bar ──────────────────────────────────────────────────────── */
 #topbar {
-  height: var(--topbar-h);
-  background: var(--bg2);
+  height: var(--topbar-h); background: var(--bg2);
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center; gap: 16px;
-  padding: 0 20px;
-  flex-shrink: 0;
-  z-index: 10;
+  padding: 0 20px; flex-shrink: 0; z-index: 10;
 }
 #topbar .logo {
   display: flex; align-items: center; gap: 8px;
@@ -88,28 +62,22 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 #topbar .logo span { font-size: 22px; }
 .topbar-sep { width: 1px; height: 28px; background: var(--border); }
 #project-name { font-size: 13px; color: var(--text-dim); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
-
 #search-container { flex: 1; max-width: 400px; position: relative; z-index: 200; }
 #search-wrap {
   display: flex; align-items: center; gap: 8px;
   background: var(--bg3); border: 1px solid var(--border);
-  border-radius: 10px; padding: 0 12px; height: 36px;
-  transition: border-color .2s;
-  width: 100%;
+  border-radius: 10px; padding: 0 12px; height: 36px; transition: border-color .2s; width: 100%;
 }
 #search-wrap:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(108,99,255,.2); }
 #search-wrap svg { opacity: .4; flex-shrink: 0; }
 #search-input { flex: 1; background: none; border: none; outline: none; color: var(--text); font-size: 13px; font-family: inherit; }
 #search-input::placeholder { color: var(--text-muted); }
-
 #search-dropdown {
   position: absolute; top: 100%; left: 0; right: 0; margin-top: 8px;
   background: var(--bg2); border: 1px solid var(--border);
   border-radius: 10px; padding: 8px; max-height: 400px; overflow-y: auto;
-  box-shadow: 0 10px 40px rgba(0,0,0,0.5); z-index: 200;
-  display: none;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5); z-index: 200; display: none;
 }
-
 .topbar-btn {
   display: flex; align-items: center; gap: 6px;
   padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border);
@@ -118,7 +86,6 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 }
 .topbar-btn:hover { background: rgba(108,99,255,.15); border-color: var(--accent); color: var(--accent); }
 .topbar-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-
 #stats-bar { margin-left: auto; display: flex; gap: 16px; align-items: center; flex-shrink: 0; }
 .stat-chip { font-size: 11px; color: var(--text-dim); }
 .stat-chip strong { color: var(--text); font-size: 13px; }
@@ -126,87 +93,43 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 /* ── Main layout ──────────────────────────────────────────────────── */
 #layout { flex: 1; display: flex; overflow: hidden; }
 
-/* ── Sidebar (filters + legend) ───────────────────────────────────── */
+/* ── Sidebar ──────────────────────────────────────────────────────── */
 #sidebar {
-  width: var(--sidebar-w);
-  background: var(--bg2);
+  width: var(--sidebar-w); background: var(--bg2);
   border-right: 1px solid var(--border);
-  display: flex; flex-direction: column;
-  overflow: hidden; flex-shrink: 0; position: relative;
+  display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; position: relative;
 }
 .sidebar-section { padding: 16px; border-bottom: 1px solid var(--border); }
 .sidebar-section h3 { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 12px; }
-
-/* node type filters */
-.filter-item {
-  display: flex; align-items: center; gap: 8px;
-  margin-bottom: 8px; cursor: pointer;
-}
+.filter-item { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer; }
 .filter-item input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
 .filter-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 .filter-label { font-size: 12px; font-weight: 500; }
 .filter-count { margin-left: auto; font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
-
-/* edge legend */
 .edge-legend-item { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .edge-legend-line { width: 14px; height: 2px; flex-shrink: 0; }
 .edge-legend-label { font-size: 11px; color: var(--text-dim); }
-
-/* layout buttons */
-.layout-btn-group { display: flex; gap: 6px; flex-wrap: wrap; }
-.layout-btn {
-  padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border);
-  background: var(--surface); color: var(--text-dim); font-size: 11px; font-family: inherit;
-  cursor: pointer; transition: all .2s;
-}
-.layout-btn:hover, .layout-btn.active { background: rgba(108,99,255,.2); border-color: var(--accent); color: var(--accent); }
-
-/* search results list */
-.search-result-item {
-  padding: 8px 10px; border-radius: 8px; margin-bottom: 4px;
-  cursor: pointer; transition: background .15s;
-  display: flex; align-items: center; gap: 8px;
-}
+.search-result-item { padding: 8px 10px; border-radius: 8px; margin-bottom: 4px; cursor: pointer; transition: background .15s; display: flex; align-items: center; gap: 8px; }
 .search-result-item:hover { background: var(--surface); }
 .sri-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .sri-name { font-size: 12px; font-weight: 500; }
 .sri-pkg { font-size: 10px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Layout running indicator */
+#layout-indicator {
+  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+  background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3);
+  border-radius: 20px; padding: 5px 14px; font-size: 11px; color: #34d399;
+  display: none; align-items: center; gap: 6px; z-index: 20; white-space: nowrap;
+}
+#layout-indicator.show { display: flex; }
+.layout-dot { width: 6px; height: 6px; border-radius: 50%; background: #34d399; animation: ping 1s cubic-bezier(0,0,0.2,1) infinite; }
+@keyframes ping { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.4)} }
+
 /* ── Graph canvas ─────────────────────────────────────────────────── */
 #graph-wrap { flex: 1; position: relative; overflow: hidden; }
-#cy { width: 100%; height: 100%; }
-
-.graph-overlay-msg {
-  position: absolute; inset: 0; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 16px;
-  pointer-events: none;
-}
-.graph-overlay-msg .big-icon { font-size: 64px; opacity: .3; }
-.graph-overlay-msg p { color: var(--text-dim); font-size: 14px; }
-
-/* floating controls */
-#graph-controls {
-  position: absolute; bottom: 20px; right: 20px;
-  display: flex; flex-direction: column; gap: 6px;
-}
-.ctrl-btn {
-  width: 36px; height: 36px; border-radius: 10px;
-  background: var(--bg3); border: 1px solid var(--border);
-  color: var(--text); font-size: 18px; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: all .2s;
-}
-.ctrl-btn:hover { background: var(--accent); border-color: var(--accent); }
-
-/* mini tooltip on hover */
-#hover-tooltip {
-  position: absolute; pointer-events: none;
-  background: var(--bg3); border: 1px solid var(--border);
-  border-radius: 8px; padding: 8px 12px;
-  font-size: 12px; display: none; max-width: 240px;
-  box-shadow: 0 8px 24px rgba(0,0,0,.5);
-  z-index: 100;
-}
+#sigma-container { width: 100%; height: 100%; cursor: grab; }
+#sigma-container:active { cursor: grabbing; }
 
 /* loading spinner */
 #loading {
@@ -216,13 +139,43 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
   flex-direction: column; gap: 16px;
 }
 #loading.show { display: flex; }
-.spinner {
-  width: 40px; height: 40px; border-radius: 50%;
-  border: 3px solid var(--border);
-  border-top-color: var(--accent);
-  animation: spin .8s linear infinite;
-}
+.spinner { width: 40px; height: 40px; border-radius: 50%; border: 3px solid var(--border); border-top-color: var(--accent); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+#loading-text { color: var(--text-dim); font-size: 13px; }
+
+/* hover tooltip */
+#hover-tooltip {
+  position: absolute; pointer-events: none;
+  background: #12121c; border: 1px solid var(--accent);
+  border-radius: 8px; padding: 8px 12px;
+  font-size: 12px; display: none; max-width: 280px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.6); z-index: 100;
+}
+
+/* selected node bar */
+#selected-bar {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  background: rgba(108,99,255,0.15); border: 1px solid rgba(108,99,255,0.35);
+  border-radius: 12px; padding: 6px 16px; display: none; align-items: center; gap: 10px;
+  z-index: 20; backdrop-filter: blur(8px);
+}
+#selected-bar.show { display: flex; }
+#selected-bar-name { font-size: 13px; font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+#selected-bar-type { font-size: 11px; color: var(--text-dim); }
+#selected-bar-clear { background: none; border: none; color: var(--text-dim); font-size: 16px; cursor: pointer; line-height: 1; margin-left: 4px; }
+#selected-bar-clear:hover { color: var(--text); }
+
+/* floating controls */
+#graph-controls { position: absolute; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 6px; }
+.ctrl-btn {
+  width: 36px; height: 36px; border-radius: 10px;
+  background: var(--bg3); border: 1px solid var(--border);
+  color: var(--text); font-size: 16px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; transition: all .2s;
+}
+.ctrl-btn:hover { background: var(--accent); border-color: var(--accent); }
+.ctrl-btn.running { background: var(--accent); border-color: var(--accent); color: #fff; animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.7} }
 
 /* ── Detail panel ─────────────────────────────────────────────────── */
 #detail-panel {
@@ -231,40 +184,50 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
   display: flex; flex-direction: column; position: relative;
 }
 #detail-panel.open { width: var(--detail-w); }
-#detail-header {
-  padding: 16px; border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; justify-content: space-between;
-}
+#detail-header { padding: 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
 #detail-header h3 { font-size: 13px; font-weight: 600; }
 #detail-close { background: none; border: none; color: var(--text-dim); font-size: 18px; cursor: pointer; line-height: 1; }
 #detail-close:hover { color: var(--text); }
 #detail-body { flex: 1; overflow-y: auto; padding: 16px; }
-
-.detail-type-badge {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
-  margin-bottom: 12px;
-}
+.detail-type-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; margin-bottom: 12px; }
 .detail-name { font-size: 18px; font-weight: 700; word-break: break-word; margin-bottom: 4px; }
 .detail-qname { font-size: 11px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; word-break: break-all; margin-bottom: 16px; }
-
 .detail-section { margin-bottom: 16px; }
 .detail-section-title { font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px; }
 .detail-kv { display: flex; gap: 8px; font-size: 12px; margin-bottom: 4px; }
 .detail-kv .k { color: var(--text-dim); min-width: 80px; }
 .detail-kv .v { font-family: 'JetBrains Mono', monospace; color: var(--text); word-break: break-all; }
-
-.related-item {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 8px; border-radius: 6px; cursor: pointer;
-  transition: background .15s; margin-bottom: 3px;
-}
+.related-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; transition: background .15s; margin-bottom: 3px; }
 .related-item:hover { background: var(--surface); }
 .related-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .related-name { font-size: 12px; }
 .related-badge { margin-left: auto; font-size: 10px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; }
 
-/* ── Notification toast ───────────────────────────────────────────── */
+/* ── Code panel ───────────────────────────────────────────────────── */
+#code-panel {
+  width: 0; background: var(--bg2); border-right: 1px solid var(--border);
+  overflow: hidden; flex-shrink: 0; transition: width .3s cubic-bezier(.4,0,.2,1);
+  display: flex; flex-direction: column; z-index: 5; position: relative;
+}
+#code-panel.open { width: var(--code-w); }
+#code-panel-header { padding: 16px; border-bottom: 1px solid var(--border); background: var(--bg3); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+#code-panel-title { font-size: 13px; font-weight: 500; font-family: 'JetBrains Mono', monospace; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 350px; }
+#code-panel-close { background: none; border: none; color: var(--text-dim); font-size: 20px; cursor: pointer; line-height: 1; }
+#code-panel-close:hover { color: var(--text); }
+#code-panel-body { flex: 1; overflow: auto; padding: 0; background: var(--bg2); }
+#code-content { margin: 0; padding: 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.5; tab-size: 4; display: block; }
+.hl-line { display: block; background-color: rgba(108,99,255,0.2); box-shadow: inset 4px 0 0 var(--accent); margin-left: -16px; padding-left: 16px; margin-right: -16px; padding-right: 16px; }
+
+/* ── Resizers ─────────────────────────────────────────────────────── */
+.resizer { position: absolute; top: 0; bottom: 0; width: 8px; background: rgba(108,99,255,0.12); cursor: col-resize; z-index: 200; transition: background 0.2s; }
+.resizer::after { content: ''; position: absolute; top: 50%; transform: translateY(-50%); left: 50%; margin-left: -1px; width: 2px; height: 40px; background: rgba(108,99,255,0.5); border-radius: 2px; }
+.resizer:hover, .resizer.dragging { background: rgba(108,99,255,0.35); }
+.resizer:hover::after, .resizer.dragging::after { background: var(--accent); }
+.resizer-right { right: -4px; }
+.resizer-left { left: -4px; }
+.no-transition { transition: none !important; }
+
+/* ── Toast ────────────────────────────────────────────────────────── */
 #toast {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px);
   background: var(--bg3); border: 1px solid var(--border);
@@ -272,55 +235,6 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
   box-shadow: 0 8px 32px rgba(0,0,0,.5); transition: transform .3s; z-index: 999;
 }
 #toast.show { transform: translateX(-50%) translateY(0); }
-
-/* ── Code Viewer Panel ───────────────────────────────────────────── */
-#code-panel {
-  width: 0; background: var(--bg2); border-right: 1px solid var(--border);
-  overflow: hidden; flex-shrink: 0; transition: width .3s cubic-bezier(.4,0,.2,1);
-  display: flex; flex-direction: column; z-index: 5; position: relative;
-}
-#code-panel.open { width: var(--code-w, 450px); }
-#code-panel-header {
-  padding: 16px; border-bottom: 1px solid var(--border); background: var(--bg3);
-  display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
-}
-#code-panel-title { font-size: 13px; font-weight: 500; font-family: 'JetBrains Mono', monospace; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 350px;}
-#code-panel-close { background: none; border: none; color: var(--text-dim); font-size: 20px; cursor: pointer; line-height: 1; }
-#code-panel-close:hover { color: var(--text); }
-#code-panel-body {
-  flex: 1; overflow: auto; padding: 0; background: var(--bg2);
-  position: relative;
-}
-#code-content {
-  margin: 0; padding: 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px;
-  line-height: 1.5; tab-size: 4; display: block;
-}
-/* Line highlighting */
-.hl-line {
-  display: block;
-  background-color: rgba(108, 99, 255, 0.2);
-  box-shadow: inset 4px 0 0 var(--accent);
-  margin-left: -16px; padding-left: 16px;
-  margin-right: -16px; padding-right: 16px;
-}
-
-/* ── Resizers ────────────────────────────────────────────────────────────── */
-.resizer {
-  position: absolute; top: 0; bottom: 0; width: 8px;
-  background: rgba(108, 99, 255, 0.12); cursor: col-resize; z-index: 200;
-  transition: background 0.2s;
-}
-.resizer::after {
-  content: ''; position: absolute; top: 50%; transform: translateY(-50%);
-  left: 50%; margin-left: -1px; width: 2px; height: 40px;
-  background: rgba(108, 99, 255, 0.5); border-radius: 2px;
-}
-.resizer:hover, .resizer.dragging { background: rgba(108, 99, 255, 0.35); }
-.resizer:hover::after, .resizer.dragging::after { background: var(--accent); }
-.resizer-right { right: -4px; }
-.resizer-left { left: -4px; }
-.no-transition { transition: none !important; }
-
 </style>
 </head>
 <body>
@@ -352,8 +266,8 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
     <div class="stat-chip"><strong id="stat-edges">—</strong> edges</div>
   </div>
 
-  <button class="topbar-btn" id="btn-theme" title="Toggle Dark/Light Mode" style="padding: 6px; width: 32px; justify-content: center;">
-    <svg id="icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: none;"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+  <button class="topbar-btn" id="btn-theme" title="Toggle Dark/Light Mode" style="padding:6px;width:32px;justify-content:center;">
+    <svg id="icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
     <svg id="icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
   </button>
 </div>
@@ -367,12 +281,10 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
       <h3>Node Types</h3>
       <div id="filter-list"></div>
     </div>
-
     <div class="sidebar-section" style="flex:1;display:flex;flex-direction:column;overflow:hidden;padding-bottom:0;">
       <h3>Edge Types</h3>
       <div id="edge-legend-list"></div>
     </div>
-    
     <div class="resizer resizer-right" id="resizer-sidebar"></div>
   </div>
 
@@ -390,19 +302,32 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 
   <!-- Graph -->
   <div id="graph-wrap">
-    <div id="cy"></div>
+    <div id="sigma-container"></div>
 
     <div id="loading">
       <div class="spinner"></div>
-      <p style="color:var(--text-dim);font-size:13px;">Building graph…</p>
+      <p id="loading-text" style="color:var(--text-dim);font-size:13px;">Building graph…</p>
     </div>
 
     <div id="hover-tooltip"></div>
+
+    <div id="selected-bar">
+      <div id="selected-bar-name"></div>
+      <div id="selected-bar-type"></div>
+      <button id="selected-bar-clear">×</button>
+    </div>
+
+    <div id="layout-indicator">
+      <div class="layout-dot"></div>
+      <span>Layout optimizing…</span>
+    </div>
 
     <div id="graph-controls">
       <button class="ctrl-btn" id="btn-zoom-in"  title="Zoom in">+</button>
       <button class="ctrl-btn" id="btn-zoom-out" title="Zoom out">−</button>
       <button class="ctrl-btn" id="btn-fit"      title="Fit to screen">⊡</button>
+      <div style="height:1px;background:var(--border);margin:2px 0;"></div>
+      <button class="ctrl-btn" id="btn-layout"   title="Re-run layout">▶</button>
     </div>
   </div>
 
@@ -420,6 +345,6 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 
 <div id="toast"></div>
 
-<script src="/static/app.js?v=4"></script>
+<script type="module" src="/static/app.js?v=6"></script>
 </body>
 </html>

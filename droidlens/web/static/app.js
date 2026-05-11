@@ -1,7 +1,11 @@
-/* ── DroidLens Graph Browser — Frontend ───────────────────────────── */
-"use strict";
+/* ── DroidLens Graph Browser — Frontend (Sigma.js + Graphology) ── */
+import Graph from 'https://esm.sh/graphology';
+import forceAtlas2 from 'https://esm.sh/graphology-layout-forceatlas2';
+import FA2Layout from 'https://esm.sh/graphology-layout-forceatlas2/worker';
+import noverlap from 'https://esm.sh/graphology-layout-noverlap';
+import Sigma from 'https://esm.sh/sigma';
 
-// ── Colour map ────────────────────────────────────────────────────────────────
+// ── Configuration ─────────────────────────────────────────────────────────────
 const NODE_COLORS = {
   Class:         "#6c63ff",
   AbstractClass: "#a78bfa",
@@ -13,154 +17,187 @@ const NODE_COLORS = {
   Field:         "#4ade80",
   Property:      "#34d399",
   Package:       "#facc15",
+  Project:       "#ef4444",
+  Module:        "#f97316",
+  Folder:        "#eab308",
+  File:          "#3b82f6"
 };
+
 const EDGE_COLORS = {
-  CONTAINS:      "#334155",
-  EXTENDS:       "#00d4aa",
-  IMPLEMENTS:    "#6c63ff",
-  CALLS:         "#f472b6",
-  USES:          "#94a3b8",
-  OVERRIDES:     "#fb923c",
-  INSTANTIATES:  "#38bdf8",
+  CONTAINS:      { color: '#2d5a3d', sizeMultiplier: 0.4 },
+  DEFINES:       { color: '#0e7490', sizeMultiplier: 0.5 },
+  IMPORTS:       { color: '#1d4ed8', sizeMultiplier: 0.6 },
+  CALLS:         { color: '#7c3aed', sizeMultiplier: 0.8 },
+  EXTENDS:       { color: '#c2410c', sizeMultiplier: 1.0 },
+  IMPLEMENTS:    { color: '#be185d', sizeMultiplier: 0.9 },
+  READS:         { color: '#10b981', sizeMultiplier: 0.7 },
+  OVERRIDES:     { color: '#fb923c', sizeMultiplier: 0.9 },
+  INSTANTIATES:  { color: '#38bdf8', sizeMultiplier: 0.8 },
+  USES:          { color: '#94a3b8', sizeMultiplier: 0.5 }
 };
+
 function nodeColor(type) { return NODE_COLORS[type] || "#94a3b8"; }
-function edgeColor(type) { return EDGE_COLORS[type] || "#334155"; }
+function edgeStyle(type) { return EDGE_COLORS[type] || { color: '#4a4a5a', sizeMultiplier: 0.5 }; }
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let cy = null;
+let graph = null;
+let sigmaInst = null;
+let fa2Layout = null;
 let allData = { nodes: [], edges: [] };
-let currentLayout = "cose";
 let activeTypes = new Set(Object.keys(NODE_COLORS));
+let activeEdgeTypes = new Set(Object.keys(EDGE_COLORS));
 let statsData = {};
+let selectedNodeId = null;
+let hoveredNodeId = null;
+let isLayoutRunning = false;
+let layoutTimeout = null;
 
-// ── Cytoscape init ────────────────────────────────────────────────────────────
-function initCy(elements) {
-  if (cy) cy.destroy();
-  cy = cytoscape({
-    container: document.getElementById("cy"),
-    elements,
-    style: buildStyle(),
-    wheelSensitivity: 0.3,
-    minZoom: 0.05,
-    maxZoom: 4,
+// ── Initialization ────────────────────────────────────────────────────────────
+function initSigma() {
+  const container = document.getElementById("sigma-container");
+  
+  graph = new Graph({ multi: true });
+  
+  sigmaInst = new Sigma(graph, container, {
+    renderLabels: true,
+    labelFont: 'JetBrains Mono, monospace',
+    labelSize: 11,
+    labelWeight: '500',
+    labelColor: { color: '#e4e4ed' },
+    labelRenderedSizeThreshold: 8,
+    labelDensity: 0.1,
+    labelGridCellSize: 70,
+    defaultNodeColor: '#6b7280',
+    defaultEdgeColor: '#2a2a3a',
+    defaultEdgeType: 'line',
+    minCameraRatio: 0.002,
+    maxCameraRatio: 50,
+    hideEdgesOnMove: true,
+    zIndex: true,
+    
+    // Custom node hover
+    defaultDrawNodeHover: (context, data, settings) => {
+      const label = data.label;
+      if (!label) return;
+      const size = settings.labelSize || 11;
+      context.font = `${settings.labelWeight || '500'} ${size}px ${settings.labelFont || 'sans-serif'}`;
+      const textWidth = context.measureText(label).width;
+      const nodeSize = data.size || 8;
+      const x = data.x, y = data.y - nodeSize - 10;
+      const paddingX = 8, paddingY = 5;
+      const height = size + paddingY * 2, width = textWidth + paddingX * 2, radius = 4;
+      
+      context.fillStyle = '#12121c';
+      context.beginPath();
+      context.roundRect(x - width/2, y - height/2, width, height, radius);
+      context.fill();
+      
+      context.strokeStyle = data.color || '#6366f1';
+      context.lineWidth = 2;
+      context.stroke();
+      
+      context.fillStyle = '#f5f5f7';
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.fillText(label, x, y);
+      
+      context.beginPath();
+      context.arc(data.x, data.y, nodeSize + 4, 0, Math.PI * 2);
+      context.strokeStyle = data.color || '#6366f1';
+      context.lineWidth = 2;
+      context.globalAlpha = 0.5;
+      context.stroke();
+      context.globalAlpha = 1;
+    },
+    
+    nodeReducer: (node, data) => {
+      const res = { ...data };
+      if (res.hidden) return res;
+      
+      if (selectedNodeId) {
+        if (node === selectedNodeId) {
+          res.size = (data.originalSize || 8) * 1.8;
+          res.zIndex = 2;
+          res.highlighted = true;
+        } else if (graph.hasEdge(node, selectedNodeId) || graph.hasEdge(selectedNodeId, node)) {
+          res.size = (data.originalSize || 8) * 1.3;
+          res.zIndex = 1;
+        } else {
+          res.color = dimColor(data.color, 0.15);
+          res.size = (data.originalSize || 8) * 0.5;
+          res.zIndex = 0;
+        }
+      }
+      
+      return res;
+    },
+    
+    edgeReducer: (edge, data) => {
+      const res = { ...data };
+      if (res.hidden) return res;
+      
+      if (selectedNodeId) {
+        const [source, target] = graph.extremities(edge);
+        if (source === selectedNodeId || target === selectedNodeId) {
+          res.color = brightenColor(data.color, 1.5);
+          res.size = Math.max(3, (data.originalSize || 1) * 4);
+          res.zIndex = 2;
+        } else {
+          res.color = dimColor(data.color, 0.1);
+          res.size = 0.3;
+          res.zIndex = 0;
+        }
+      }
+      return res;
+    }
   });
 
-  cy.on("tap", "node", onNodeTap);
-  cy.on("mouseover", "node", onNodeHover);
-  cy.on("mouseout",  "node", onNodeOut);
-  cy.on("tap", (e) => { if (e.target === cy) closeDetail(); });
-
-  runLayout();
+  sigmaInst.on("clickNode", (e) => {
+    focusNode(e.node);
+  });
+  
+  sigmaInst.on("clickStage", () => {
+    clearSelection();
+  });
+  
+  sigmaInst.on("enterNode", (e) => {
+    hoveredNodeId = e.node;
+    document.getElementById("sigma-container").style.cursor = 'pointer';
+    showHoverTooltip(e.node, sigmaInst.getNodeDisplayData(e.node));
+  });
+  
+  sigmaInst.on("leaveNode", () => {
+    hoveredNodeId = null;
+    document.getElementById("sigma-container").style.cursor = 'grab';
+    hideHoverTooltip();
+  });
 }
 
-function buildStyle() {
-  return [
-    {
-      selector: "node",
-      style: {
-        "background-color": (n) => nodeColor(n.data("type")),
-        "background-opacity": 0.9,
-        "border-width": 2,
-        "border-color": (n) => nodeColor(n.data("type")),
-        "border-opacity": 0.5,
-        "label": "data(name)",
-        "color": "#e2e8f0",
-        "font-size": 10,
-        "font-family": "Inter, sans-serif",
-        "font-weight": 500,
-        "text-valign": "bottom",
-        "text-margin-y": 4,
-        "text-outline-color": "#080b12",
-        "text-outline-width": 1,
-        "width": (n) => nodeSize(n.data("type")),
-        "height": (n) => nodeSize(n.data("type")),
-        "shape": (n) => nodeShape(n.data("type")),
-        "transition-property": "background-color, border-color, width, height",
-        "transition-duration": "0.15s",
-      },
-    },
-    {
-      selector: "node:selected",
-      style: {
-        "border-width": 3,
-        "border-opacity": 1,
-        "border-color": "#fff",
-        "shadow-blur": 16,
-        "shadow-color": (n) => nodeColor(n.data("type")),
-        "shadow-opacity": 0.8,
-        "shadow-offset-x": 0,
-        "shadow-offset-y": 0,
-      },
-    },
-    {
-      selector: "node.highlighted",
-      style: {
-        "border-width": 3,
-        "border-opacity": 1,
-        "opacity": 1,
-      },
-    },
-    {
-      selector: "node.dimmed",
-      style: { "opacity": 0.15 },
-    },
-    {
-      selector: "edge",
-      style: {
-        "width": 1.5,
-        "line-color": (e) => edgeColor(e.data("type")),
-        "line-opacity": 0.6,
-        "target-arrow-color": (e) => edgeColor(e.data("type")),
-        "target-arrow-shape": "triangle",
-        "arrow-scale": 0.7,
-        "curve-style": "bezier",
-        "label": "",
-      },
-    },
-    {
-      selector: "edge.highlighted",
-      style: { "line-opacity": 1, "width": 2.5 },
-    },
-    {
-      selector: "edge.dimmed",
-      style: { "line-opacity": 0.04 },
-    },
-  ];
+function dimColor(hex, amount) {
+  return "#334155"; // Simplistic dim color
+}
+function brightenColor(hex, factor) {
+  return "#ffffff";
 }
 
-function nodeSize(type) {
-  const sizes = { Package: 40, Class: 28, AbstractClass: 28, Interface: 24, Enum: 22, Object: 24, Method: 16, Function: 16, Field: 12, Property: 12 };
-  return sizes[type] || 18;
-}
-function nodeShape(type) {
-  const shapes = { Interface: "diamond", Enum: "pentagon", Object: "hexagon", Method: "ellipse", Function: "ellipse", Field: "rectangle", Property: "rectangle" };
-  return shapes[type] || "ellipse";
-}
-
-// ── Layout ────────────────────────────────────────────────────────────────────
-function runLayout() {
-  if (!cy) return;
-  const layouts = {
-    cose:      { name: "cose",  animate: true, animationDuration: 600, nodeRepulsion: 8000, idealEdgeLength: 80 },
-  };
-  cy.layout(layouts[currentLayout] || layouts.cose).run();
-}
-
-// ── Load graph data ───────────────────────────────────────────────────────────
+// ── Graph logic ───────────────────────────────────────────────────────────────
 async function loadGraph() {
   showLoading(true);
   try {
     const types = [...activeTypes].join(",");
-    const resp = await fetch(`/api/graph?node_types=${encodeURIComponent(types)}&max_nodes=600`);
+    const resp = await fetch(`/api/graph?node_types=${encodeURIComponent(types)}&max_nodes=10000`);
     allData = await resp.json();
-    renderGraph(allData);
-
+    
+    if (!graph) initSigma();
+    buildGraphology(allData);
+    
     const statsResp = await fetch("/api/stats");
     statsData = await statsResp.json();
     updateStatsBar(statsData);
     updateProjectName(statsData);
     buildFilterList(statsData);
     buildEdgeLegend();
+    
   } catch (e) {
     showToast("Failed to load graph: " + e.message, 4000);
   } finally {
@@ -168,29 +205,287 @@ async function loadGraph() {
   }
 }
 
-function renderGraph(data) {
-  const elements = [
-    ...data.nodes.map((n) => ({
-      group: "nodes",
-      data: { id: n.id, label: n.name, ...n },
-    })),
-    ...data.edges.map((e) => ({
-      group: "edges",
-      data: { id: e.id, source: e.source_id, target: e.target_id, ...e },
-    })),
-  ];
-  initCy(elements);
-  document.getElementById("stat-nodes").textContent = data.nodes.length;
-  document.getElementById("stat-edges").textContent = data.edges.length;
+function buildGraphology(data) {
+  graph.clear();
+  
+  const nodeCount = data.nodes.length;
+  const parentToChildren = new Map();
+  const childToParent = new Map();
+  const hierarchyRelations = new Set(['CONTAINS', 'DEFINES', 'IMPORTS']);
+  
+  data.edges.forEach(e => {
+    if (hierarchyRelations.has(e.type)) {
+      if (!parentToChildren.has(e.source_id)) parentToChildren.set(e.source_id, []);
+      parentToChildren.get(e.source_id).push(e.target_id);
+      childToParent.set(e.target_id, e.source_id);
+    }
+  });
+
+  const structuralTypes = new Set(['Project', 'Package', 'Module', 'Folder']);
+  const structuralNodes = data.nodes.filter(n => structuralTypes.has(n.type));
+  const structuralSpread = Math.sqrt(nodeCount) * 40;
+  const childJitter = Math.sqrt(nodeCount) * 3;
+  
+  const nodePositions = new Map();
+  
+  structuralNodes.forEach((node, idx) => {
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+    const angle = idx * goldenAngle;
+    const radius = structuralSpread * Math.sqrt((idx + 1) / Math.max(structuralNodes.length, 1));
+    const jitter = structuralSpread * 0.15;
+    const x = radius * Math.cos(angle) + (Math.random() - 0.5) * jitter;
+    const y = radius * Math.sin(angle) + (Math.random() - 0.5) * jitter;
+    nodePositions.set(node.id, { x, y });
+  });
+
+  const addNodeWithPos = (nodeData) => {
+    if (graph.hasNode(nodeData.id)) return;
+    let x, y;
+    const parentId = childToParent.get(nodeData.id);
+    const parentPos = parentId ? nodePositions.get(parentId) : null;
+    
+    if (parentPos) {
+      x = parentPos.x + (Math.random() - 0.5) * childJitter;
+      y = parentPos.y + (Math.random() - 0.5) * childJitter;
+    } else {
+      x = (Math.random() - 0.5) * structuralSpread * 0.5;
+      y = (Math.random() - 0.5) * structuralSpread * 0.5;
+    }
+    
+    // Default fallback position
+    if(nodePositions.has(nodeData.id)) {
+        x = nodePositions.get(nodeData.id).x;
+        y = nodePositions.get(nodeData.id).y;
+    } else {
+        nodePositions.set(nodeData.id, { x, y });
+    }
+
+    const baseSize = 8;
+    const scaledSize = nodeCount > 5000 ? Math.max(2, baseSize * 0.6) : baseSize;
+    
+    graph.addNode(nodeData.id, {
+      ...nodeData,
+      x, y,
+      size: scaledSize,
+      originalSize: scaledSize,
+      color: nodeColor(nodeData.type),
+      label: nodeData.name,
+      nodeType: nodeData.type,
+      type: 'circle'
+    });
+  };
+  
+  const nodeMap = new Map(data.nodes.map(n => [n.id, n]));
+  const queue = [...structuralNodes.map(n => n.id)];
+  const visited = new Set(queue);
+  
+  while (queue.length > 0) {
+    const curr = queue.shift();
+    const children = parentToChildren.get(curr) || [];
+    for (const childId of children) {
+      if (!visited.has(childId)) {
+        visited.add(childId);
+        const childNode = nodeMap.get(childId);
+        if (childNode) addNodeWithPos(childNode);
+        queue.push(childId);
+      }
+    }
+  }
+  
+  data.nodes.forEach(n => {
+    if (!graph.hasNode(n.id)) addNodeWithPos(n);
+  });
+  
+  const edgeBaseSize = nodeCount > 5000 ? 0.6 : 1.0;
+  
+  data.edges.forEach(e => {
+    if (graph.hasNode(e.source_id) && graph.hasNode(e.target_id)) {
+      const style = edgeStyle(e.type);
+      graph.addEdge(e.source_id, e.target_id, {
+        ...e,
+        size: edgeBaseSize * style.sizeMultiplier,
+        originalSize: edgeBaseSize * style.sizeMultiplier,
+        color: style.color,
+        type: 'line',
+        relationType: e.type
+      });
+    }
+  });
+  
+  applyFilters();
+  runLayout();
 }
 
-// ── Filters ───────────────────────────────────────────────────────────────────
+function runLayout() {
+  if (!graph || graph.order === 0) return;
+  
+  if (fa2Layout) {
+    fa2Layout.kill();
+    fa2Layout = null;
+  }
+  if (layoutTimeout) clearTimeout(layoutTimeout);
+  
+  const nodeCount = graph.order;
+  const isSmall = nodeCount < 500;
+  const isMedium = nodeCount >= 500 && nodeCount < 2000;
+  
+  const settings = forceAtlas2.inferSettings(graph);
+  settings.gravity = isSmall ? 0.8 : isMedium ? 0.5 : 0.3;
+  settings.scalingRatio = isSmall ? 15 : isMedium ? 30 : 60;
+  settings.slowDown = isSmall ? 1 : isMedium ? 2 : 3;
+  settings.barnesHutOptimize = nodeCount > 200;
+  
+  fa2Layout = new FA2Layout(graph, { settings });
+  fa2Layout.start();
+  
+  document.getElementById("layout-indicator").classList.add("show");
+  document.getElementById("btn-layout").classList.add("running");
+  isLayoutRunning = true;
+  
+  const duration = nodeCount > 5000 ? 35000 : nodeCount > 1000 ? 25000 : 10000;
+  
+  layoutTimeout = setTimeout(() => {
+    stopLayout();
+  }, duration);
+}
+
+function stopLayout() {
+  if (fa2Layout) {
+    fa2Layout.stop();
+    fa2Layout = null;
+    
+    // Apply Noverlap
+    try {
+        noverlap.assign(graph, {
+          maxIterations: 20,
+          ratio: 1.1,
+          margin: 10,
+          expansion: 1.05
+        });
+    } catch(e) { console.warn("Noverlap failed", e); }
+    
+    sigmaInst.refresh();
+  }
+  document.getElementById("layout-indicator").classList.remove("show");
+  document.getElementById("btn-layout").classList.remove("running");
+  isLayoutRunning = false;
+}
+
+// ── UI Actions ────────────────────────────────────────────────────────────────
+function focusNode(nodeId) {
+  if (!graph || !graph.hasNode(nodeId)) return;
+  selectedNodeId = nodeId;
+  
+  // Wait for the side panels' CSS width transition (0.3s) to finish 
+  // before updating the camera.
+  setTimeout(() => {
+    sigmaInst.refresh();
+    if (sigmaInst) sigmaInst.getCamera().animatedReset({duration:300});
+  }, 350);
+  
+  const nodeData = graph.getNodeAttributes(nodeId);
+  showDetail(nodeData);
+  showCodeViewer(nodeData.file_path, nodeData.line_number, nodeData.language);
+  updateSelectedBar(nodeData);
+  
+  // Refresh immediately to show highlighting, then reset camera after panels open
+  sigmaInst.refresh();
+}
+
+function clearSelection() {
+  selectedNodeId = null;
+  sigmaInst?.refresh();
+  closeDetail();
+  document.getElementById("selected-bar").classList.remove("show");
+}
+
+function updateSelectedBar(nodeData) {
+  const bar = document.getElementById("selected-bar");
+  document.getElementById("selected-bar-name").textContent = nodeData.name;
+  document.getElementById("selected-bar-type").textContent = nodeData.type;
+  bar.classList.add("show");
+}
+
+document.getElementById("selected-bar-clear").addEventListener("click", clearSelection);
+
+// Tooltips
+function showHoverTooltip(nodeId, displayData) {
+  if (selectedNodeId) return; // Don't show if something is selected
+  const node = graph.getNodeAttributes(nodeId);
+  const tt = document.getElementById("hover-tooltip");
+  tt.innerHTML = `<strong>${node.name}</strong><br/><span style="color:var(--text-dim)">${node.type} &middot; ${node.language || ""}</span>`;
+  tt.style.display = "block";
+  // Convert graph coordinates to viewport coordinates
+  const vpPos = sigmaInst.framedGraphToViewport(displayData);
+  tt.style.left = (vpPos.x + 12) + "px";
+  tt.style.top  = (vpPos.y - 10) + "px";
+}
+
+function hideHoverTooltip() {
+  document.getElementById("hover-tooltip").style.display = "none";
+}
+
+// ── Search & Filter ───────────────────────────────────────────────────────────
+const searchInput = document.getElementById("search-input");
+const searchDropdown = document.getElementById("search-dropdown");
+let searchTimer = null;
+
+searchInput.addEventListener("input", (e) => {
+  clearTimeout(searchTimer);
+  const q = e.target.value.trim().toLowerCase();
+  if (!q) { searchDropdown.style.display = "none"; return; }
+  searchTimer = setTimeout(() => doLocalSearch(q), 250);
+});
+
+function doLocalSearch(query) {
+  if (!graph) return;
+  const results = [];
+  graph.forEachNode((node, attrs) => {
+    if (attrs.name.toLowerCase().includes(query) || (attrs.qualified_name && attrs.qualified_name.toLowerCase().includes(query))) {
+      results.push({ id: node, ...attrs });
+    }
+  });
+  
+  searchDropdown.innerHTML = "";
+  if (results.length === 0) {
+    searchDropdown.innerHTML = `<div style="padding:12px;color:var(--text-muted);font-size:12px;">No results</div>`;
+  } else {
+    results.slice(0, 30).forEach(n => {
+      const div = document.createElement("div");
+      div.className = "search-result-item";
+      div.innerHTML = `
+        <span class="sri-dot" style="background:${nodeColor(n.type)}"></span>
+        <div style="min-width:0">
+          <div class="sri-name">${n.name}</div>
+          <div class="sri-pkg">${n.qualified_name || ""}</div>
+        </div>
+      `;
+      div.addEventListener("click", () => {
+        searchDropdown.style.display = "none";
+        focusNode(n.id);
+      });
+      searchDropdown.appendChild(div);
+    });
+  }
+  searchDropdown.style.display = "block";
+}
+
+// Filtering
+function applyFilters() {
+  if (!graph) return;
+  graph.forEachNode((node, attrs) => {
+    graph.setNodeAttribute(node, "hidden", !activeTypes.has(attrs.nodeType));
+  });
+  graph.forEachEdge((edge, attrs) => {
+    graph.setEdgeAttribute(edge, "hidden", !activeEdgeTypes.has(attrs.relationType));
+  });
+  if (sigmaInst) sigmaInst.refresh();
+}
+
 function buildFilterList(stats) {
   const container = document.getElementById("filter-list");
-  const byType = stats.nodes_by_type || {};
   container.innerHTML = "";
   Object.entries(NODE_COLORS).forEach(([type, color]) => {
-    const count = byType[type] || 0;
     const checked = activeTypes.has(type);
     const div = document.createElement("div");
     div.className = "filter-item";
@@ -198,11 +493,10 @@ function buildFilterList(stats) {
       <input type="checkbox" id="f-${type}" ${checked ? "checked" : ""} />
       <span class="filter-dot" style="background:${color}"></span>
       <label class="filter-label" for="f-${type}">${type}</label>
-      <span class="filter-count">${count}</span>
     `;
     div.querySelector("input").addEventListener("change", (e) => {
       e.target.checked ? activeTypes.add(type) : activeTypes.delete(type);
-      loadGraph();
+      applyFilters();
     });
     container.appendChild(div);
   });
@@ -210,133 +504,32 @@ function buildFilterList(stats) {
 
 function buildEdgeLegend() {
   const container = document.getElementById("edge-legend-list");
-  if (!container) return;
   container.innerHTML = "";
-  Object.entries(EDGE_COLORS).forEach(([type, color]) => {
+  Object.entries(EDGE_COLORS).forEach(([type, style]) => {
+    const checked = activeEdgeTypes.has(type);
     const div = document.createElement("div");
-    div.className = "edge-legend-item";
+    div.className = "filter-item";
     div.innerHTML = `
-      <div class="edge-legend-line" style="background:${color}"></div>
+      <input type="checkbox" id="e-${type}" ${checked ? "checked" : ""} />
+      <div class="edge-legend-line" style="background:${style.color}"></div>
       <div class="edge-legend-label">${type}</div>
     `;
+    div.querySelector("input").addEventListener("change", (e) => {
+      e.target.checked ? activeEdgeTypes.add(type) : activeEdgeTypes.delete(type);
+      applyFilters();
+    });
     container.appendChild(div);
   });
 }
 
-// ── Search ────────────────────────────────────────────────────────────────────
-let searchTimer = null;
-const searchInput = document.getElementById("search-input");
-const searchDropdown = document.getElementById("search-dropdown");
-
-searchInput.addEventListener("input", (e) => {
-  clearTimeout(searchTimer);
-  const q = e.target.value.trim();
-  if (!q) { clearSearchResults(); return; }
-  searchTimer = setTimeout(() => doSearch(q), 250);
-});
-
-// Close dropdown when clicking outside
-document.addEventListener("click", (e) => {
-  if (!e.target.closest("#search-container")) {
-    searchDropdown.style.display = "none";
-  }
-});
-searchInput.addEventListener("focus", () => {
-  if (searchDropdown.innerHTML.trim() !== "") {
-    searchDropdown.style.display = "block";
-  }
-});
-
-async function doSearch(q) {
-  const resp = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-  const results = await resp.json();
-  renderSearchResults(results);
-}
-
-function renderSearchResults(results) {
-  searchDropdown.innerHTML = "";
-  searchDropdown.style.display = "block";
-  if (!results.length) {
-    searchDropdown.innerHTML = `<div style="padding:12px;color:var(--text-muted);font-size:12px;">No results</div>`;
-    return;
-  }
-  results.slice(0, 30).forEach((n) => {
-    const div = document.createElement("div");
-    div.className = "search-result-item";
-    div.innerHTML = `
-      <span class="sri-dot" style="background:${nodeColor(n.type)}"></span>
-      <div style="min-width:0">
-        <div class="sri-name">${n.name}</div>
-        <div class="sri-pkg">${n.package_name || n.qualified_name || ""}</div>
-      </div>
-    `;
-    div.addEventListener("click", (e) => {
-      searchDropdown.style.display = "none";
-      focusNode(n.id);
-    });
-    searchDropdown.appendChild(div);
-  });
-}
-
-function clearSearchResults() {
-  searchDropdown.innerHTML = "";
-  searchDropdown.style.display = "none";
-}
-
-function focusNode(nodeId) {
-  if (!cy) return;
-  const node = cy.getElementById(nodeId);
-  if (!node || !node.length) { showToast("Node not visible — adjust filters."); return; }
-  cy.animate({ fit: { eles: node.closedNeighborhood(), padding: 80 }, duration: 400 });
-  
-  dimAll();
-  highlightNeighborhood(node);
-  node.select();
-  showDetail(node.data());
-  showCodeViewer(node.data("file_path"), node.data("line_number"), node.data("language"));
-}
-
-// ── Node interactions ─────────────────────────────────────────────────────────
-function onNodeTap(e) {
-  const node = e.target;
-  dimAll();
-  highlightNeighborhood(node);
-  showDetail(node.data());
-  showCodeViewer(node.data("file_path"), node.data("line_number"), node.data("language"));
-}
-
-function onNodeHover(e) {
-  const node = e.target;
-  const pos = e.renderedPosition || { x: 0, y: 0 };
-  const wrap = document.getElementById("graph-wrap");
-  const rect = wrap.getBoundingClientRect();
-  const tt = document.getElementById("hover-tooltip");
-  tt.innerHTML = `<strong>${node.data("name")}</strong><br/><span style="color:var(--text-dim)">${node.data("type")} · ${node.data("language") || ""}</span>`;
-  tt.style.display = "block";
-  tt.style.left = (pos.x + rect.left + 12) + "px";
-  tt.style.top  = (pos.y + rect.top  - 10) + "px";
-}
-function onNodeOut() {
-  document.getElementById("hover-tooltip").style.display = "none";
-}
-
-function dimAll() {
-  cy.elements().removeClass("highlighted dimmed");
-  cy.elements().addClass("dimmed");
-}
-function highlightNeighborhood(node) {
-  const hood = node.closedNeighborhood();
-  hood.removeClass("dimmed").addClass("highlighted");
-}
-
-// ── Detail panel ──────────────────────────────────────────────────────────────
+// ── Node Detail Panel ─────────────────────────────────────────────────────────
 async function showDetail(nodeData) {
   const panel = document.getElementById("detail-panel");
   const body  = document.getElementById("detail-body");
   panel.classList.add("open");
-
+  
   body.innerHTML = `<div style="color:var(--text-dim);font-size:13px;padding:20px 0;text-align:center;">Loading…</div>`;
-
+  
   try {
     const resp = await fetch(`/api/node/${nodeData.id}`);
     const data = await resp.json();
@@ -350,10 +543,10 @@ function renderDetailPanel(data) {
   const n = data.node;
   const color = nodeColor(n.type);
   const body  = document.getElementById("detail-body");
-
-  const relSection = (title, items, isOutgoing) => {
-    if (!items.length) return "";
-    const rows = items.map((e) => {
+  
+  const relSection = (title, items) => {
+    if (!items || !items.length) return "";
+    const rows = items.map(e => {
       const other = e.other_node;
       if (!other) return "";
       return `<div class="related-item" data-id="${other.id}">
@@ -362,84 +555,38 @@ function renderDetailPanel(data) {
         <span class="related-badge">${e.type}</span>
       </div>`;
     }).join("");
-    return `<div class="detail-section">
-      <div class="detail-section-title">${title}</div>
-      ${rows}
-    </div>`;
+    return `<div class="detail-section"><div class="detail-section-title">${title}</div>${rows}</div>`;
   };
-
+  
   body.innerHTML = `
-    <div class="detail-type-badge" style="background:${color}22;color:${color}">
-      ${typeIcon(n.type)} ${n.type}
-    </div>
+    <div class="detail-type-badge" style="background:${color}22;color:${color}">${n.type}</div>
     <div class="detail-name">${n.name}</div>
     <div class="detail-qname">${n.qualified_name || n.name}</div>
-
     <div class="detail-section">
       <div class="detail-section-title">Info</div>
       <div class="detail-kv"><span class="k">Language</span><span class="v">${n.language || "—"}</span></div>
       <div class="detail-kv"><span class="k">Package</span><span class="v">${n.package_name || "—"}</span></div>
-      <div class="detail-kv"><span class="k">Visibility</span><span class="v">${n.visibility || "—"}</span></div>
-      <div class="detail-kv"><span class="k">Abstract</span><span class="v">${n.is_abstract ? "yes" : "no"}</span></div>
-      <div class="detail-kv">
-        <span class="k">File</span>
-        <span class="v" style="font-size:10px; display:flex; align-items:center; gap:8px;">
-          ${shortPath(n.file_path)}
-        </span>
-      </div>
+      <div class="detail-kv"><span class="k">File</span><span class="v">${n.file_path ? n.file_path.split(/[\\/]/).slice(-3).join('/') : "—"}</span></div>
       <div class="detail-kv"><span class="k">Line</span><span class="v">${n.line_number || "—"}</span></div>
     </div>
-
-    ${relSection("Outgoing Relations", data.outgoing || [], true)}
-    ${relSection("Incoming Relations", data.incoming || [], false)}
+    ${relSection("Outgoing", data.outgoing)}
+    ${relSection("Incoming", data.incoming)}
   `;
-
-  // Click related nodes to navigate
-  body.querySelectorAll(".related-item[data-id]").forEach((el) => {
+  
+  body.querySelectorAll(".related-item[data-id]").forEach(el => {
     el.addEventListener("click", () => focusNode(el.dataset.id));
   });
-}
-
-function typeIcon(type) {
-  const icons = { Class:"⬡", AbstractClass:"⬡", Interface:"◇", Enum:"⬠", Object:"⬡", Method:"ƒ", Function:"ƒ", Field:"▪", Property:"▪", Package:"📦" };
-  return icons[type] || "●";
-}
-function shortPath(fp) {
-  if (!fp) return "—";
-  const parts = fp.replace(/\\/g, "/").split("/");
-  return parts.slice(-3).join("/");
 }
 
 function closeDetail() {
   document.getElementById("detail-panel").classList.remove("open");
   document.getElementById("code-panel").classList.remove("open");
-  cy && cy.elements().removeClass("highlighted dimmed");
 }
 
-// ── Stats & project info ───────────────────────────────────────────────────────
-function updateStatsBar(stats) {
-  document.getElementById("stat-nodes").textContent = stats.node_count ?? "—";
-  document.getElementById("stat-edges").textContent = stats.edge_count ?? "—";
-}
-function updateProjectName(stats) {
-  const el = document.getElementById("project-name");
-  el.textContent = stats.project ? `📁 ${stats.project}` : "No project loaded";
-}
-
-// ── Controls ──────────────────────────────────────────────────────────────────
-document.getElementById("btn-zoom-in").addEventListener("click",  () => cy && cy.zoom({ level: cy.zoom() * 1.25, renderedPosition: { x: cy.width()/2, y: cy.height()/2 } }));
-document.getElementById("btn-zoom-out").addEventListener("click", () => cy && cy.zoom({ level: cy.zoom() * 0.8,  renderedPosition: { x: cy.width()/2, y: cy.height()/2 } }));
-document.getElementById("btn-fit").addEventListener("click",      () => cy && cy.fit(undefined, 40));
-document.getElementById("btn-reload").addEventListener("click",   () => loadGraph());
-document.getElementById("detail-close").addEventListener("click", closeDetail);
-
-// ── Code Viewer ───────────────────────────────────────────────────────────────
+// ── Code Panel ────────────────────────────────────────────────────────────────
 async function showCodeViewer(filePath, lineNumber, language) {
   const panel = document.getElementById("code-panel");
-  if (!filePath) {
-    panel.classList.remove("open");
-    return;
-  }
+  if (!filePath) { panel.classList.remove("open"); return; }
   
   const title = document.getElementById("code-panel-title");
   const codeContent = document.getElementById("code-content");
@@ -447,47 +594,34 @@ async function showCodeViewer(filePath, lineNumber, language) {
   title.textContent = filePath.split(/[\\/]/).pop();
   title.title = filePath;
   codeContent.textContent = "Loading...";
-  codeContent.className = "hljs"; // Reset hljs classes
+  codeContent.className = "hljs";
   panel.classList.add("open");
   
   try {
     const resp = await fetch(`/api/source?file_path=${encodeURIComponent(filePath)}`);
-    if (!resp.ok) {
-      const err = await resp.json();
-      throw new Error(err.detail || "Failed to load file");
-    }
+    if (!resp.ok) throw new Error(await resp.text());
     const data = await resp.json();
     
-    // Highlight the raw string first, then split by newline and wrap.
-    let highlighted;
+    let highlighted = hljs.highlightAuto(data.content).value;
     if (language === "kotlin" || language === "java") {
-      highlighted = hljs.highlight(data.content, { language: language }).value;
-    } else {
-      highlighted = hljs.highlightAuto(data.content).value;
+      highlighted = hljs.highlight(data.content, { language }).value;
     }
     
-    const hlLines = highlighted.split('\n');
+    const lines = highlighted.split('\n');
     let finalHtml = "";
-    hlLines.forEach((line, idx) => {
-      const currentLine = idx + 1;
-      if (lineNumber && currentLine === lineNumber) {
+    lines.forEach((line, idx) => {
+      if (lineNumber && idx + 1 === lineNumber) {
         finalHtml += `<span class="hl-line" id="hl-target">${line || ' '}</span>\n`;
       } else {
         finalHtml += `${line}\n`;
       }
     });
-    
     codeContent.innerHTML = finalHtml;
     
-    // Auto-scroll to the highlighted line
     setTimeout(() => {
       const target = document.getElementById("hl-target");
-      if (target) {
-        // scroll inside the panel body
-        target.scrollIntoView({ behavior: "smooth", block: "center" });
-      }
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 100);
-    
   } catch (e) {
     codeContent.textContent = "Error: " + e.message;
   }
@@ -497,47 +631,62 @@ document.getElementById("code-panel-close").addEventListener("click", () => {
   document.getElementById("code-panel").classList.remove("open");
 });
 
-// Theme toggle
+// ── Misc UI ───────────────────────────────────────────────────────────────────
+function updateStatsBar(stats) {
+  document.getElementById("stat-nodes").textContent = stats.node_count ?? "—";
+  document.getElementById("stat-edges").textContent = stats.edge_count ?? "—";
+}
+function updateProjectName(stats) {
+  document.getElementById("project-name").textContent = stats.project ? `📁 ${stats.project}` : "No project loaded";
+}
+
+let toastTimer = null;
+function showToast(msg, duration = 2500) {
+  const el = document.getElementById("toast");
+  el.textContent = msg; el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), duration);
+}
+function showLoading(show) {
+  document.getElementById("loading").classList.toggle("show", show);
+}
+
+// Theme
 const themeBtn = document.getElementById("btn-theme");
 const iconSun = document.getElementById("icon-sun");
 const iconMoon = document.getElementById("icon-moon");
-const hljsTheme = document.getElementById("hljs-theme");
-
 function setTheme(theme) {
   if (theme === "light") {
     document.documentElement.setAttribute("data-theme", "light");
-    iconSun.style.display = "none";
-    iconMoon.style.display = "block";
-    hljsTheme.href = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-light.min.css";
+    iconSun.style.display = "none"; iconMoon.style.display = "block";
+    document.getElementById("hljs-theme").href = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-light.min.css";
     localStorage.setItem("droidlens-theme", "light");
   } else {
     document.documentElement.removeAttribute("data-theme");
-    iconSun.style.display = "block";
-    iconMoon.style.display = "none";
-    hljsTheme.href = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css";
+    iconSun.style.display = "block"; iconMoon.style.display = "none";
+    document.getElementById("hljs-theme").href = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css";
     localStorage.setItem("droidlens-theme", "dark");
   }
 }
+themeBtn.addEventListener("click", () => {
+  setTheme(document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light");
+});
+const savedTheme = localStorage.getItem("droidlens-theme");
+if (savedTheme) setTheme(savedTheme);
 
-// ── Resizers ──────────────────────────────────────────────────────────────────
+// Resizers
 function initResizer(resizerId, panelId, isRight, minW, maxW) {
   const resizer = document.getElementById(resizerId);
   const panel = document.getElementById(panelId);
   if (!resizer || !panel) return;
-
-  let isDragging = false;
-  let startX, startWidth;
-
+  let isDragging = false, startX, startWidth;
+  
   resizer.addEventListener("mousedown", (e) => {
-    isDragging = true;
-    startX = e.clientX;
-    startWidth = panel.offsetWidth;
-    panel.classList.add("no-transition");
-    resizer.classList.add("dragging");
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
+    isDragging = true; startX = e.clientX; startWidth = panel.offsetWidth;
+    panel.classList.add("no-transition"); resizer.classList.add("dragging");
+    document.body.style.cursor = "col-resize"; document.body.style.userSelect = "none";
   });
-
+  
   document.addEventListener("mousemove", (e) => {
     if (!isDragging) return;
     let dx = e.clientX - startX;
@@ -545,57 +694,40 @@ function initResizer(resizerId, panelId, isRight, minW, maxW) {
     if (newWidth < minW) newWidth = minW;
     if (newWidth > maxW) newWidth = maxW;
     
-    if (panelId === "sidebar") {
-      document.documentElement.style.setProperty("--sidebar-w", newWidth + "px");
-    } else if (panelId === "detail-panel") {
-      document.documentElement.style.setProperty("--detail-w", newWidth + "px");
-    } else if (panelId === "code-panel") {
-      document.documentElement.style.setProperty("--code-w", newWidth + "px");
-    }
+    if (panelId === "sidebar") document.documentElement.style.setProperty("--sidebar-w", newWidth + "px");
+    else if (panelId === "detail-panel") document.documentElement.style.setProperty("--detail-w", newWidth + "px");
+    else if (panelId === "code-panel") document.documentElement.style.setProperty("--code-w", newWidth + "px");
   });
-
+  
   document.addEventListener("mouseup", () => {
     if (isDragging) {
       isDragging = false;
-      panel.classList.remove("no-transition");
-      resizer.classList.remove("dragging");
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      if (cy) setTimeout(() => cy.resize(), 50);
+      panel.classList.remove("no-transition"); resizer.classList.remove("dragging");
+      document.body.style.cursor = ""; document.body.style.userSelect = "";
     }
   });
 }
-
 initResizer("resizer-sidebar", "sidebar", true, 200, 600);
 initResizer("resizer-code", "code-panel", true, 300, 800);
 initResizer("resizer-detail", "detail-panel", false, 250, 600);
 
+// Controls
+document.getElementById("btn-zoom-in").addEventListener("click", () => sigmaInst && sigmaInst.getCamera().animatedZoom({duration:200}));
+document.getElementById("btn-zoom-out").addEventListener("click", () => sigmaInst && sigmaInst.getCamera().animatedUnzoom({duration:200}));
+document.getElementById("btn-fit").addEventListener("click", () => {
+  if (sigmaInst) sigmaInst.getCamera().animatedReset({duration:300});
+});
+document.getElementById("btn-layout").addEventListener("click", () => {
+  if (isLayoutRunning) stopLayout();
+  else runLayout();
+});
+document.getElementById("btn-reload").addEventListener("click", () => loadGraph());
+document.getElementById("detail-close").addEventListener("click", clearSelection);
 
-themeBtn.addEventListener("click", () => {
-  const isLight = document.documentElement.getAttribute("data-theme") === "light";
-  setTheme(isLight ? "dark" : "light");
+// Dropdown hide
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#search-container")) document.getElementById("search-dropdown").style.display = "none";
 });
 
-// Init theme
-const savedTheme = localStorage.getItem("droidlens-theme");
-if (savedTheme) {
-  setTheme(savedTheme);
-}
-
-// ── Toast ─────────────────────────────────────────────────────────────────────
-let toastTimer = null;
-function showToast(msg, duration = 2500) {
-  const el = document.getElementById("toast");
-  el.textContent = msg;
-  el.classList.add("show");
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove("show"), duration);
-}
-
-// ── Loading ───────────────────────────────────────────────────────────────────
-function showLoading(show) {
-  document.getElementById("loading").classList.toggle("show", show);
-}
-
-// ── Boot ──────────────────────────────────────────────────────────────────────
+// Boot
 loadGraph();

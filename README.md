@@ -2,7 +2,7 @@
 
 <div align="center">
 
-  <img src="logo.png" alt="DroidLens Logo" width="320" height="320"/>
+  <img src="assets/logo.png" alt="DroidLens Logo" width="320" height="320"/>
 
   <h2>Visual code intelligence for Android codebases.</h2>
 
@@ -29,7 +29,7 @@ DroidLens indexes your entire Android codebase — every class, method, field, d
 
 **TL;DR:** The **Graph Browser** is a visual way to explore any Android repo. The **CLI + MCP** is how you make your AI agent actually reliable — it gives your coding assistant a deep architectural view of your Kotlin/Java code so it stays aware of inheritance, interface implementations, and blast radius.
 
-![DroidLens Graph UI](screen_shot_graph_ui.png)
+![DroidLens Graph UI](assets/screen_shot_graph_ui.png)
 
 ---
 

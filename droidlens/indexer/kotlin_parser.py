@@ -2,6 +2,8 @@
 Kotlin source parser using tree-sitter.
 Extracts: packages, classes, interfaces, objects, functions, properties,
 inheritance (delegation_specifiers), and call expressions.
+Also tracks property initializer references (READS edges) to constants and
+properties from other objects/classes (e.g. Constants.SHARE_PREFERENCE_NAME).
 """
 from pathlib import Path
 from typing import List, Tuple, Optional
@@ -265,9 +267,125 @@ class KotlinFileParser:
         if parent_id:
             self._add_edge(parent_id, pid, EdgeType.CONTAINS)
 
+        # Scan the initializer expression for READS edges to constants/properties
+        self._collect_property_reads(node, pid)
+
+    def _collect_property_reads(self, prop_node: TSNode, prop_id: str):
+        """Walk the property initializer and emit READS edges for
+        navigation expressions of the form  Qualifier.member  that reference
+        constants or properties defined on another class/object.
+
+        Tree-sitter-kotlin represents  Constants.SHARE_PREFERENCE_NAME  as:
+            navigation_expression
+              ├─ simple_identifier  "Constants"       (the qualifier)
+              └─ navigation_suffix
+                  └─ simple_identifier  "SHARE_PREFERENCE_NAME"  (the member)
+        """
+        # Locate the initializer — it follows the '=' token in the property_declaration
+        initializer = None
+        found_eq = False
+        for child in prop_node.children:
+            if found_eq:
+                initializer = child
+                break
+            if child.type == "=" or _node_text(child, self.src) == "=":
+                found_eq = True
+
+        if initializer is None:
+            return
+
+        self._walk_reads(initializer, prop_id)
+
+    def _walk_reads(self, node: TSNode, prop_id: str):
+        """Recursively scan an expression subtree and emit READS edges for
+        every  Qualifier.MEMBER  navigation expression that is a pure property
+        or constant access (not a method call callee).
+
+        Skips navigation_expressions that are the callee of a call_expression
+        (e.g. ``context.getSharedPreferences(...)``).
+        """
+        if node.type == "navigation_expression":
+            # Skip if this navigation_expression is the callee of a call_expression
+            is_method_callee = (
+                node.parent is not None
+                and node.parent.type == "call_expression"
+                and node.parent.children
+                and node.parent.children[0].id == node.id
+            )
+            if not is_method_callee:
+                qualifier, member = self._extract_nav_parts(node)
+                if qualifier and member:
+                    ref_qname = f"{qualifier}.{member}"
+                    ref_id = _uid(ref_qname, "property_ref")
+                    if not self._get_node(ref_id):
+                        self.nodes.append(Node(
+                            id=ref_id, type=NodeType.PROPERTY,
+                            name=member, qualified_name=ref_qname,
+                            language="kotlin",
+                        ))
+                    self._add_edge(prop_id, ref_id, EdgeType.READS,
+                                   {"line": node.start_point[0] + 1,
+                                    "qualifier": qualifier})
+            # Do NOT recurse into children of this navigation_expression.
+            return
+        # Recurse into children for all other node types
+        for child in node.children:
+            self._walk_reads(child, prop_id)
+
+
+    def _extract_nav_parts(self, nav_node: TSNode) -> tuple:
+        """Return (qualifier, member) for a navigation_expression node,
+        or (None, None) if the structure doesn't qualify.
+
+        tree-sitter-kotlin produces two possible AST shapes:
+
+        Shape A (flat identifiers):
+            navigation_expression
+              identifier  "Constants"
+              .
+              identifier  "SHARE_PREFERENCE_NAME"
+
+        Shape B (navigation_suffix):
+            navigation_expression
+              simple_identifier  "Constants"
+              navigation_suffix
+                simple_identifier  "SHARE_PREFERENCE_NAME"
+
+        Rules
+        -----
+        - Only handle simple two-part expressions (Qualifier.MEMBER).
+        - The qualifier MUST start with an uppercase letter — this filters out
+          instance-variable access like ``throwable.message`` or
+          ``_state.postValue`` where the qualifier is a local variable/field.
+          Uppercase qualifiers indicate class names or singleton objects
+          (e.g. Constants, BuildConfig, Context, ActivityResultContracts).
+        """
+        identifiers = []
+
+        for child in nav_node.children:
+            if child.type == "navigation_suffix":
+                for sub in child.children:
+                    if sub.type in ("simple_identifier", "identifier"):
+                        identifiers.append(_node_text(sub, self.src).strip())
+            elif child.type in ("simple_identifier", "identifier"):
+                identifiers.append(_node_text(child, self.src).strip())
+            # skip "." and other punctuation
+
+        # Only handle simple two-part expressions (Qualifier.MEMBER)
+        if len(identifiers) == 2:
+            qualifier, member = identifiers[0], identifiers[1]
+            # Qualifier must be a class/object name (starts with uppercase)
+            if qualifier and qualifier[0].isupper():
+                return qualifier, member
+        return None, None
+
+
+
+
+
     def _collect_calls(self, node: TSNode, caller_id: str):
         if node.type == "call_expression":
-            # Try to get the name being called
+            # ── Emit CALLS edge for the callee ──────────────────────────────
             first = node.children[0] if node.children else None
             if first:
                 callee_name = ""
@@ -287,8 +405,37 @@ class KotlinFileParser:
                                                language="kotlin"))
                     self._add_edge(caller_id, cid, EdgeType.CALLS,
                                    {"line": node.start_point[0] + 1})
+
+        elif node.type == "navigation_expression":
+            # ── Emit READS edge for Qualifier.MEMBER constant/property access ──
+            # Only when this expression is NOT the callee of a call_expression.
+            # The callee is always children[0] of the enclosing call_expression.
+            is_method_callee = (
+                node.parent is not None
+                and node.parent.type == "call_expression"
+                and node.parent.children
+                and node.parent.children[0].id == node.id
+            )
+            if not is_method_callee:
+                qualifier, member = self._extract_nav_parts(node)
+                if qualifier and member:
+                    ref_qname = f"{qualifier}.{member}"
+                    ref_id = _uid(ref_qname, "property_ref")
+                    if not self._get_node(ref_id):
+                        self.nodes.append(Node(
+                            id=ref_id, type=NodeType.PROPERTY,
+                            name=member, qualified_name=ref_qname,
+                            language="kotlin",
+                        ))
+                    self._add_edge(caller_id, ref_id, EdgeType.READS,
+                                   {"line": node.start_point[0] + 1,
+                                    "qualifier": qualifier})
+            # Do NOT recurse into navigation_expression children
+            return
+
         for child in node.children:
             self._collect_calls(child, caller_id)
+
 
 
 def parse_kotlin_file(file_path: str) -> Tuple[List[Node], List[Edge]]:
@@ -297,7 +444,7 @@ def parse_kotlin_file(file_path: str) -> Tuple[List[Node], List[Edge]]:
     fp = KotlinFileParser(file_path, src)
     fp.parse(tree.root_node)
 
-    # Simple intra-file method call resolution
+    # ── Intra-file method call resolution ─────────────────────────────────
     concrete_methods = {n.name: n.id for n in fp.nodes if n.type == NodeType.METHOD and n.file_path}
     method_refs = {n.id: n for n in fp.nodes if n.type == NodeType.METHOD and not n.file_path}
 
@@ -307,7 +454,23 @@ def parse_kotlin_file(file_path: str) -> Tuple[List[Node], List[Edge]]:
             if ref_name in concrete_methods:
                 edge.target_id = concrete_methods[ref_name]
 
-    # Remove unreferenced method_refs to keep graph clean
+    # ── Intra-file property/constant READS resolution ─────────────────────
+    # Build a lookup: qualified_name → node.id for every concrete Property in this file
+    concrete_props_by_qname = {
+        n.qualified_name: n.id
+        for n in fp.nodes
+        if n.type == NodeType.PROPERTY and n.file_path
+    }
+    # property_ref placeholders have no file_path
+    prop_refs = {n.id: n for n in fp.nodes if n.type == NodeType.PROPERTY and not n.file_path}
+
+    for edge in fp.edges:
+        if edge.type == EdgeType.READS and edge.target_id in prop_refs:
+            ref_qname = prop_refs[edge.target_id].qualified_name
+            if ref_qname in concrete_props_by_qname:
+                edge.target_id = concrete_props_by_qname[ref_qname]
+
+    # ── Clean up unreferenced placeholder nodes ────────────────────────────
     used_nodes = {e.target_id for e in fp.edges} | {e.source_id for e in fp.edges}
     fp.nodes = [n for n in fp.nodes if n.file_path or n.id in used_nodes]
 

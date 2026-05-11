@@ -100,6 +100,101 @@ def _resolve_cross_file_calls(storage: GraphStorage):
     storage.commit()
 
 
+def _resolve_cross_file_reads(storage: GraphStorage):
+    """Resolve property_ref placeholder nodes (no file_path) to concrete
+    Property/Field nodes that were indexed from other files.
+
+    Strategy
+    --------
+    Placeholders created by _walk_reads carry a  qualified_name  of the form
+    ``SimpleClassName.MEMBER``  (e.g. "Constants.SHARE_PREFERENCE_NAME").
+    We try two levels of matching, in order:
+
+    1. Exact qualified_name match against concrete Property/Field nodes.
+    2. Simple-name match when only one concrete node has that member name
+       (avoids false-positive links when the name is common).
+    """
+    import hashlib
+    from droidlens.graph.models import Edge, EdgeType, NodeType
+
+    # ── Collect placeholder property refs (no file_path) ──────────────────
+    prop_refs = {
+        n.id: n
+        for n in storage.get_all_nodes()
+        if n.type.value in ("Property", "Field") and not n.file_path
+    }
+    if not prop_refs:
+        return
+
+    # ── Index concrete Property/Field nodes ───────────────────────────────
+    concrete_by_qname: dict[str, list] = {}   # qualified_name → [node, …]
+    concrete_by_name:  dict[str, list] = {}   # simple name    → [node, …]
+    for n in storage.get_all_nodes():
+        if n.type.value in ("Property", "Field") and n.file_path:
+            concrete_by_qname.setdefault(n.qualified_name, []).append(n)
+            concrete_by_name.setdefault(n.name, []).append(n)
+
+    new_edges: list[Edge] = []
+    edges_to_delete: list[str] = []
+
+    for e in storage.get_all_edges():
+        if e.type != EdgeType.READS or e.target_id not in prop_refs:
+            continue
+
+        ref_node = prop_refs[e.target_id]
+        ref_qname = ref_node.qualified_name   # e.g. "Constants.SHARE_PREFERENCE_NAME"
+        ref_name  = ref_node.name             # e.g. "SHARE_PREFERENCE_NAME"
+
+        targets = []
+
+        # 1. Exact qualified_name match
+        #    The placeholder qname is "Qualifier.MEMBER" which may or may not
+        #    include the full package prefix, so check both the full qname and
+        #    any concrete node whose qname ends with ".Qualifier.MEMBER".
+        for cqname, nodes in concrete_by_qname.items():
+            if cqname == ref_qname or cqname.endswith(f".{ref_qname}"):
+                targets.extend(nodes)
+
+        # 2. Fallback: simple-name match only when unambiguous
+        if not targets:
+            candidates = concrete_by_name.get(ref_name, [])
+            if len(candidates) == 1:
+                targets = candidates
+
+        if not targets:
+            continue
+
+        edges_to_delete.append(e.id)
+        for cnode in targets:
+            new_eid = hashlib.md5(
+                f"{e.source_id}|{cnode.id}|{EdgeType.READS.value}".encode()
+            ).hexdigest()[:16]
+            new_edges.append(Edge(
+                id=new_eid,
+                source_id=e.source_id,
+                target_id=cnode.id,
+                type=EdgeType.READS,
+                metadata=e.metadata,
+            ))
+
+    for e in new_edges:
+        storage.upsert_edge(e)
+    for eid in edges_to_delete:
+        storage._conn.execute("DELETE FROM edges WHERE id=?", (eid,))
+
+    # Remove fully-orphaned placeholder nodes
+    storage._conn.execute("""
+        DELETE FROM nodes
+        WHERE (file_path IS NULL OR file_path='')
+          AND type IN ('Property', 'Field')
+          AND id NOT IN (SELECT target_id FROM edges)
+          AND id NOT IN (SELECT source_id FROM edges)
+    """)
+    storage.commit()
+
+
+
+
 def _resolve_cross_file_types(storage: GraphStorage):
     """Link abstract type refs to concrete classes/interfaces across the entire project."""
     import hashlib
@@ -200,9 +295,11 @@ def build_graph(
 
         storage.commit()
 
-    # Perform cross-file call and type resolution
+    # Perform cross-file call, type, and property-reads resolution
     _resolve_cross_file_calls(storage)
     _resolve_cross_file_types(storage)
+    _resolve_cross_file_reads(storage)
+
 
     stats = storage.get_stats()
     storage.set_project_info("path", project_path)

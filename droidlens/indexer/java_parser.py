@@ -226,9 +226,46 @@ class JavaFileParser:
                 self._add_node(f)
                 self._add_edge(class_id, fid, EdgeType.CONTAINS)
 
+                # Scan the initializer for READS edges (e.g. Constants.SOME_CONST)
+                init_node = child.child_by_field_name("value")
+                if init_node:
+                    self._walk_reads_java(init_node, fid)
+
+    def _walk_reads_java(self, node: TSNode, field_id: str):
+        """Recursively scan a Java expression and emit READS edges for
+        field_access nodes of the form  Qualifier.MEMBER  (e.g. Constants.KEY)."""
+        if node.type == "field_access":
+            qualifier, member = self._extract_field_access(node)
+            if qualifier and member:
+                ref_qname = f"{qualifier}.{member}"
+                ref_id = _uid(ref_qname, "property_ref")
+                if not any(x.id == ref_id for x in self.nodes):
+                    self.nodes.append(Node(
+                        id=ref_id, type=NodeType.FIELD,
+                        name=member, qualified_name=ref_qname,
+                        language="java",
+                    ))
+                self._add_edge(field_id, ref_id, EdgeType.READS,
+                               {"line": node.start_point[0] + 1,
+                                "qualifier": qualifier})
+        for child in node.children:
+            self._walk_reads_java(child, field_id)
+
+    def _extract_field_access(self, node: TSNode) -> tuple:
+        """Return (qualifier, member) for a Java field_access node."""
+        obj_node   = node.child_by_field_name("object")
+        field_node = node.child_by_field_name("field")
+        if obj_node and field_node:
+            return _node_text(obj_node, self.src).strip(), _node_text(field_node, self.src).strip()
+        return None, None
+
+
+
+
     def _collect_calls(self, node: TSNode, caller_id: str):
-        """Recursively walk a block and emit CALLS edges for method_invocations."""
+        """Recursively walk a block and emit CALLS + READS edges."""
         if node.type == "method_invocation":
+            # ── Emit CALLS edge for the method name ─────────────────────────
             name_node = node.child_by_field_name("name")
             if name_node:
                 callee_name = _node_text(name_node, self.src)
@@ -239,8 +276,38 @@ class JavaFileParser:
                                            language="java"))
                 self._add_edge(caller_id, callee_id, EdgeType.CALLS,
                                {"line": node.start_point[0] + 1})
+
+        elif node.type == "field_access":
+            # ── Emit READS edge for ClassName.CONSTANT access ────────────────
+            # Skip if this field_access is the "object" of a method_invocation
+            # (e.g. SomeClass.INSTANCE.method() — the outer chain, not a value read).
+            is_method_object = (
+                node.parent is not None
+                and node.parent.type == "method_invocation"
+                and node.parent.child_by_field_name("object") is not None
+                and node.parent.child_by_field_name("object").id == node.id
+            )
+            if not is_method_object:
+                qualifier, member = self._extract_field_access(node)
+                if qualifier and member:
+                    ref_qname = f"{qualifier}.{member}"
+                    ref_id = _uid(ref_qname, "property_ref")
+                    if not any(x.id == ref_id for x in self.nodes):
+                        self.nodes.append(Node(
+                            id=ref_id, type=NodeType.FIELD,
+                            name=member, qualified_name=ref_qname,
+                            language="java",
+                        ))
+                    self._add_edge(caller_id, ref_id, EdgeType.READS,
+                                   {"line": node.start_point[0] + 1,
+                                    "qualifier": qualifier})
+            # Do NOT recurse into field_access children
+            return
+
         for child in node.children:
             self._collect_calls(child, caller_id)
+
+
 
     def _get_node(self, nid: str) -> Optional[Node]:
         for n in self.nodes:

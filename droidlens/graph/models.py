@@ -24,6 +24,7 @@ class EdgeType(str, Enum):
     USES = "USES"
     OVERRIDES = "OVERRIDES"
     INSTANTIATES = "INSTANTIATES"
+    READS = "READS"   # property/field initializer reads a constant or property
 
 
 @dataclass

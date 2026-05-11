@@ -36,8 +36,14 @@ def _update_gitignore(project_path: str):
 
 
 def _resolve_cross_file_calls(storage: GraphStorage):
-    """Link abstract method refs to concrete methods across the entire project."""
+    """Link abstract method refs to concrete methods across the entire project.
+    
+    Uses the 'qualifier' metadata on CALLS edges (e.g. 'loginRepo' for loginRepo.getMerchant())
+    to prefer methods whose containing class name matches the qualifier — preventing false
+    cross-layer edges (e.g. ViewModel → Service in MVVM architecture).
+    """
     import hashlib
+    import json
     from droidlens.graph.models import Edge, EdgeType
 
     # Ignore very common standard library/framework method names that cause false positive links
@@ -54,12 +60,27 @@ def _resolve_cross_file_calls(storage: GraphStorage):
     }
     if not abstract_methods:
         return
-        
+
+    # Build lookup: method name → [node, …]
     concrete_nodes = {}
     for n in storage.get_all_nodes():
         if n.type.value in ("Method", "Class") and n.file_path:
             concrete_nodes.setdefault(n.name, []).append(n)
-            
+
+    # Build lookup: method node id → parent class name (from CONTAINS edges)
+    # e.g. Service.getMerchant → parent class = "Service"
+    method_parent_class = {}
+    for e in storage.get_all_edges():
+        if e.type.value == "CONTAINS":
+            method_parent_class[e.target_id] = e.source_id  # target=method, source=class
+
+    # Build lookup: class node id → class name
+    class_name_by_id = {
+        n.id: n.name
+        for n in storage.get_all_nodes()
+        if n.type.value in ("Class", "Interface", "AbstractClass")
+    }
+        
     new_edges = []
     edges_to_delete = []
     
@@ -70,21 +91,48 @@ def _resolve_cross_file_calls(storage: GraphStorage):
                 continue
 
             concrete_targets = concrete_nodes.get(method_name, [])
-            
-            if concrete_targets:
-                edges_to_delete.append(e.id)
+            if not concrete_targets:
+                continue
+
+            # ── Qualifier-based filtering ─────────────────────────────────
+            # If the edge has a 'qualifier' (e.g. 'loginRepo' from loginRepo.getMerchant()),
+            # prefer candidates whose parent class name contains the qualifier (case-insensitive).
+            # e.g. qualifier='loginRepo' → prefer 'LoginRepo', 'LoginRepoImpl' over 'Service'
+            qualifier = None
+            if e.metadata:
+                try:
+                    meta = e.metadata if isinstance(e.metadata, dict) else json.loads(e.metadata)
+                    qualifier = meta.get("qualifier", "")
+                except Exception:
+                    pass
+
+            if qualifier:
+                qualifier_lower = qualifier.lower()
+                filtered = []
                 for cnode in concrete_targets:
-                    cid = cnode.id
-                    etype = EdgeType.INSTANTIATES if cnode.type.value == "Class" else e.type
-                    new_eid = hashlib.md5(f"{e.source_id}|{cid}|{etype.value}".encode()).hexdigest()[:16]
-                    new_edge = Edge(
-                        id=new_eid,
-                        source_id=e.source_id,
-                        target_id=cid,
-                        type=etype,
-                        metadata=e.metadata
-                    )
-                    new_edges.append(new_edge)
+                    parent_class_id = method_parent_class.get(cnode.id)
+                    if parent_class_id:
+                        parent_class_name = class_name_by_id.get(parent_class_id, "").lower()
+                        # Match: e.g. qualifier='loginRepo' matches class 'LoginRepo' or 'LoginRepoImpl'
+                        if qualifier_lower in parent_class_name or parent_class_name in qualifier_lower:
+                            filtered.append(cnode)
+                # Only use filtered set if it is non-empty — prevents over-filtering
+                if filtered:
+                    concrete_targets = filtered
+
+            edges_to_delete.append(e.id)
+            for cnode in concrete_targets:
+                cid = cnode.id
+                etype = EdgeType.INSTANTIATES if cnode.type.value == "Class" else e.type
+                new_eid = hashlib.md5(f"{e.source_id}|{cid}|{etype.value}".encode()).hexdigest()[:16]
+                new_edge = Edge(
+                    id=new_eid,
+                    source_id=e.source_id,
+                    target_id=cid,
+                    type=etype,
+                    metadata=e.metadata
+                )
+                new_edges.append(new_edge)
                     
     for e in new_edges:
         storage.upsert_edge(e)

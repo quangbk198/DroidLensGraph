@@ -389,13 +389,21 @@ class KotlinFileParser:
             first = node.children[0] if node.children else None
             if first:
                 callee_name = ""
+                qualifier_name = ""  # e.g. "loginRepo" in loginRepo.getMerchant()
                 if first.type in ("simple_identifier", "identifier"):
                     callee_name = _node_text(first, self.src)
                 elif first.type == "navigation_expression":
-                    # e.g. viewModel.someMethod() — get last identifier
-                    for sub in reversed(first.children):
+                    # e.g. loginRepo.getMerchant() — capture qualifier + method name
+                    nav_children = first.children
+                    # Last identifier is the method name
+                    for sub in reversed(nav_children):
                         if sub.type in ("simple_identifier", "identifier"):
                             callee_name = _node_text(sub, self.src)
+                            break
+                    # First identifier is the qualifier (receiver)
+                    for sub in nav_children:
+                        if sub.type in ("simple_identifier", "identifier"):
+                            qualifier_name = _node_text(sub, self.src)
                             break
                 if callee_name:
                     cid = _uid(callee_name, "method_ref")
@@ -403,8 +411,10 @@ class KotlinFileParser:
                         self.nodes.append(Node(id=cid, type=NodeType.METHOD,
                                                name=callee_name, qualified_name=callee_name,
                                                language="kotlin"))
-                    self._add_edge(caller_id, cid, EdgeType.CALLS,
-                                   {"line": node.start_point[0] + 1})
+                    meta = {"line": node.start_point[0] + 1}
+                    if qualifier_name and qualifier_name != callee_name:
+                        meta["qualifier"] = qualifier_name
+                    self._add_edge(caller_id, cid, EdgeType.CALLS, meta)
 
         elif node.type == "navigation_expression":
             # ── Emit READS edge for Qualifier.MEMBER constant/property access ──
@@ -443,15 +453,8 @@ def parse_kotlin_file(file_path: str) -> Tuple[List[Node], List[Edge]]:
     fp = KotlinFileParser(file_path, src)
     fp.parse(tree.root_node)
 
-    # ── Intra-file method call resolution ─────────────────────────────────
-    concrete_methods = {n.name: n.id for n in fp.nodes if n.type == NodeType.METHOD and n.file_path}
-    method_refs = {n.id: n for n in fp.nodes if n.type == NodeType.METHOD and not n.file_path}
-
-    for edge in fp.edges:
-        if edge.type == EdgeType.CALLS and edge.target_id in method_refs:
-            ref_name = method_refs[edge.target_id].name
-            if ref_name in concrete_methods:
-                edge.target_id = concrete_methods[ref_name]
+    # ── Removed aggressive intra-file method call resolution ──
+    # Leaving abstract nodes intact allows _resolve_cross_file_calls to link to ALL matching methods across the project.
 
     # ── Intra-file property/constant READS resolution ─────────────────────
     # Build a lookup: qualified_name → node.id for every concrete Property in this file

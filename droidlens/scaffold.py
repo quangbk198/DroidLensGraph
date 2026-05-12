@@ -635,9 +635,12 @@ def _scaffold_agents_md(root: Path, project_name: str) -> None:
         # Replace the existing block
         before = existing[: existing.index(start_tag)]
         after = existing[existing.index(end_tag) + len(end_tag):]
-        updated = before + block.strip() + "\n" + after
-        agents_md.write_text(updated, encoding="utf-8")
+        updated = before + block.rstrip("\n") + after
+        if updated != existing:
+            agents_md.write_text(updated, encoding="utf-8")
     else:
         # Append the block at the end
         separator = "\n" if existing.endswith("\n") else "\n\n"
-        agents_md.write_text(existing + separator + block, encoding="utf-8")
+        updated = existing + separator + block
+        if updated != existing:
+            agents_md.write_text(updated, encoding="utf-8")
